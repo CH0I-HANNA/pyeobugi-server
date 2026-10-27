@@ -13,3 +13,8 @@ spring:
           time_zone: Asia/Seoul
   flyway:
     enabled: true
+
+logging:
+  pattern:
+    # TraceIdFilter가 MDC에 넣은 traceId를 모든 로그에 붙인다. 요청 밖의 로그(서버 시작 등)는 빈 괄호 없이 출력
+    correlation: "%replace([%X{traceId}] ){'\\[\\] ', ''}"

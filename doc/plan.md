@@ -594,6 +594,15 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
       └─ GET  /api/reports/summary   → 8-5, 8-6
 ```
 
+**필터 규칙** (순서 상수는 `FilterOrders`)
+
+| 필터 | 적용 범위 | 규칙 |
+| --- | --- | --- |
+| `TraceIdFilter` | 모든 요청 | `req-` + 16진수 8자리를 MDC `traceId`에 넣고 요청이 끝나면 지운다. 로그 패턴(`logging.pattern.correlation`)으로 모든 로그 줄에 `[req-xxxxxxxx]`가 붙는다 |
+| `DeviceIdFilter` | `/api/**`, `OPTIONS` 제외 | UUID v4(대소문자 무관)가 아니면 400 `DEVICE_ID_INVALID`. 통과하면 **소문자로 바꿔** 요청 속성 `deviceId`에 담는다. 대문자로 보낸 기기가 다른 기기로 집계되지 않게 하기 위함 |
+
+> 기기 ID 대소문자 처리는 mock `validate.ts`와 다를 수 있다. 0단계 분석 때 확인한다.
+
 ### 8-2. 이벤트 검증기
 
 초안의 규칙은 **최상위 위반은 400, 이벤트 내부 위반은 해당 이벤트만 `rejected`** 다. Jackson의 `FAIL_ON_UNKNOWN_PROPERTIES` 하나로 처리하면 이벤트 내부 위반도 배치 전체 400이 되므로, 아래처럼 두 단계로 나눈다.

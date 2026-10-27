@@ -1,14 +1,13 @@
 package com.pyeobugi.server.common.error;
 
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -21,26 +20,20 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @WebMvcTest
-@Import(GlobalExceptionHandlerTest.TestController.class)
+@Import({GlobalExceptionHandlerTest.TestController.class, ErrorResponseWriter.class})
 class GlobalExceptionHandlerTest {
 
 	@Autowired
 	MockMvc mockMvc;
 
-	@AfterEach
-	void clearMdc() {
-		MDC.clear();
-	}
-
 	@Test
 	void apiExceptionUsesItsCodeAndStatus() throws Exception {
-		MDC.put(ErrorResponse.TRACE_ID_MDC_KEY, "req-7f3a9c2e");
-
+		// traceId는 슬라이스 테스트에도 함께 뜨는 TraceIdFilter가 만든다
 		mockMvc.perform(get("/test/api-exception"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("DEVICE_ID_INVALID"))
 				.andExpect(jsonPath("$.message").isNotEmpty())
-				.andExpect(jsonPath("$.traceId").value("req-7f3a9c2e"))
+				.andExpect(jsonPath("$.traceId").value(matchesPattern("^req-[0-9a-f]{8}$")))
 				.andExpect(jsonPath("$.retryAfter").doesNotExist());
 	}
 
