@@ -3,3 +3,12 @@ spring:
     url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:pyeobugi}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+
+server:
+  # 리버스 프록시(Nginx)가 넣은 X-Forwarded-For로 클라이언트 IP를 판단 (plan 8-7)
+  # Tomcat RemoteIpValve는 기본으로 사설망·루프백 프록시만 신뢰한다
+  forward-headers-strategy: native
+
+pyeobugi:
+  ip-hash:
+    secret: ${IP_HASH_SECRET}   # 32자 이상, Git에 올리지 않음

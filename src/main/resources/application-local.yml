@@ -3,3 +3,7 @@ spring:
   docker:
     compose:
       lifecycle-management: start-only   # 서버를 꺼도 MySQL 컨테이너는 유지
+
+pyeobugi:
+  ip-hash:
+    secret: local-only-ip-hash-secret-do-not-use-in-prod   # 운영은 환경 변수 IP_HASH_SECRET
