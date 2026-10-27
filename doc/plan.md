@@ -336,7 +336,7 @@ spring:
 
 | 환경 | 연결 정보 출처 | 시간대 파라미터 넣는 곳 |
 | --- | --- | --- |
-| `local` | Docker Compose Support가 `compose.yaml`(MySQL 8.4)을 읽어 자동 구성 | `compose.yaml`의 `org.springframework.boot.jdbc.parameters` 라벨 |
+| `local` | Docker Compose Support가 `compose.yaml`(MySQL 8.4, 호스트 포트 `13306` 고정)을 읽어 자동 구성. DB 툴 접속은 `127.0.0.1:13306`, `pyeobugi` / `pyeobugi-local` | `compose.yaml`의 `org.springframework.boot.jdbc.parameters` 라벨 |
 | 테스트 | Testcontainers `@ServiceConnection` (MySQL 8.4) | `TestcontainersConfiguration`의 `withUrlParam` |
 | `prod` | `application-prod.yml`의 `spring.datasource.url` + 환경 변수 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | URL에 직접 |
 

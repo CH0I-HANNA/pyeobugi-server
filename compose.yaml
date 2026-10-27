@@ -10,4 +10,4 @@ services:
       # Docker Compose Support가 만드는 JDBC URL에 붙는 파라미터 (plan 6-3 시간대 고정)
       org.springframework.boot.jdbc.parameters: 'connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true'
     ports:
-      - '3306'
+      - '13306:3306'   # 로컬 DB 툴 접속용 고정 포트 (3306은 다른 MySQL과 겹칠 수 있어 피함)
