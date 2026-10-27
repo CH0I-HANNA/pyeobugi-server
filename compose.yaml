@@ -1,10 +1,13 @@
 services:
   mysql:
-    image: 'mysql:latest'
+    image: 'mysql:8.4'
     environment:
-      - 'MYSQL_DATABASE=mydatabase'
-      - 'MYSQL_PASSWORD=secret'
-      - 'MYSQL_ROOT_PASSWORD=verysecret'
-      - 'MYSQL_USER=myuser'
+      - 'MYSQL_DATABASE=pyeobugi'
+      - 'MYSQL_USER=pyeobugi'
+      - 'MYSQL_PASSWORD=pyeobugi-local'
+      - 'MYSQL_ROOT_PASSWORD=root-local'
+    labels:
+      # Docker Compose Support가 만드는 JDBC URL에 붙는 파라미터 (plan 6-3 시간대 고정)
+      org.springframework.boot.jdbc.parameters: 'connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true'
     ports:
       - '3306'

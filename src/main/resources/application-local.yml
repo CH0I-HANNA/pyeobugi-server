@@ -1,0 +1,5 @@
+# DB 연결 정보는 Docker Compose Support가 compose.yaml을 읽어 자동으로 구성한다.
+spring:
+  docker:
+    compose:
+      lifecycle-management: start-only   # 서버를 꺼도 MySQL 컨테이너는 유지

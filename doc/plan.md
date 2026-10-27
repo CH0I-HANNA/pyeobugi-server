@@ -186,7 +186,7 @@ dependencies {
     // ... Initializr가 만든 의존성들 ...
 
     // API 문서 (Swagger UI) — Boot 버전과 호환되는 3.x 버전 사용
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.x'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 
     // Rate Limit
     implementation 'com.bucket4j:bucket4j_jdk17-core:8.x.x'
@@ -197,7 +197,7 @@ dependencies {
 ```
 
 - `x`는 Maven Central에서 최신 버전을 확인해 채운다. Bucket4j는 버전에 따라 아티팩트 이름이 바뀐 적이 있으므로 검색 결과의 아티팩트명을 그대로 쓴다.
-- springdoc은 Boot의 마이너 버전을 늦게 따라가는 경우가 있다. Initializr 기본값이 4.1.x 이상이면 **springdoc 지원이 확인된 Boot 버전**으로 맞춘다.
+- springdoc은 Boot의 마이너 버전을 늦게 따라가는 경우가 있다. Initializr 기본값이 4.1.x 이상이면 **springdoc 지원이 확인된 Boot 버전**으로 맞춘다. 현재 Boot 4.0.9 + springdoc 3.0.3 (3.1.x부터는 Boot 4.1 기준).
 - Boot 4부터는 Jackson 3가 기본이라 `JsonNode`의 import 경로가 예전 자료와 다를 수 있다. 예제 코드를 옮길 때 IDE 자동 import로 프로젝트에 실제로 있는 패키지를 선택한다.
 
 ### 4-3. 프로젝트 생성 설정
@@ -312,16 +312,14 @@ CREATE TABLE events (
 
 ### 6-4. JPA 설정과 엔티티 매핑
 
-**`application.yml`**
+**`application.yml`** (공통)
 
 ```yaml
 spring:
   application:
     name: pyeobugi-server
-  datasource:
-    url: jdbc:mysql://localhost:3306/pyeobugi?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+  profiles:
+    default: local
   jpa:
     open-in-view: false        # 요청 끝까지 DB 연결을 잡아두지 않음
     hibernate:
@@ -333,6 +331,17 @@ spring:
   flyway:
     enabled: true
 ```
+
+**DB 연결 정보** (프로필·환경별)
+
+| 환경 | 연결 정보 출처 | 시간대 파라미터 넣는 곳 |
+| --- | --- | --- |
+| `local` | Docker Compose Support가 `compose.yaml`(MySQL 8.4)을 읽어 자동 구성 | `compose.yaml`의 `org.springframework.boot.jdbc.parameters` 라벨 |
+| 테스트 | Testcontainers `@ServiceConnection` (MySQL 8.4) | `TestcontainersConfiguration`의 `withUrlParam` |
+| `prod` | `application-prod.yml`의 `spring.datasource.url` + 환경 변수 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | URL에 직접 |
+
+- 자동 구성(Docker Compose, Testcontainers)은 `spring.datasource.url`을 무시하고 URL을 직접 만들기 때문에, 시간대 파라미터를 위 표의 위치에 따로 넣어야 한다.
+- `forceConnectionTimeZoneToSession`은 세션에 `Asia/Seoul` 이름으로 시간대를 지정하므로 MySQL에 시간대 테이블이 있어야 한다. 공식 Docker 이미지는 기본으로 넣어 주고, 운영 DB는 배포 때 확인한다.
 
 - `ddl-auto`는 `validate`가 아니라 `none`으로 둔다. 스키마의 `CHAR(36)`, `TINYINT`, `JSON` 컬럼은 Hibernate가 기대하는 기본 타입과 달라 검증 오류가 나기 쉽다. 스키마 일치는 Testcontainers 통합 테스트로 확인한다.
 
