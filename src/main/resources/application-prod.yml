@@ -5,6 +5,7 @@ spring:
     password: ${DB_PASSWORD}
 
 server:
+  port: ${PORT:8080}   # Railway 같은 PaaS는 포트를 PORT 환경 변수로 지정한다
   # 리버스 프록시(Nginx)가 넣은 X-Forwarded-For로 클라이언트 IP를 판단 (plan 8-7)
   # Tomcat RemoteIpValve는 기본으로 사설망·루프백 프록시만 신뢰한다
   forward-headers-strategy: native

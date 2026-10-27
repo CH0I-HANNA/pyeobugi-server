@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 기준일 | 2026-10-27 |
-| 기준 커밋 | `937df20` (main) |
+| 기준일 | 2026-10-28 |
+| 기준 커밋 | `fbfc1c6` (main) |
 | 설계 문서 | [`doc/plan.md`](plan.md) (v3). 이 문서는 **무엇이 끝났고 무엇이 남았는지**만 정리하고, 규칙과 설계 이유는 plan.md 장 번호로 연결한다 |
 
 ---
@@ -19,8 +19,8 @@
 | 4. 조회 API (확장) | ✅ 완료 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` |
 | 5. 보호 기능 | ✅ 완료 | Rate Limit, IP HMAC 해시, 요청 로그. CORS는 불필요해서 제외 |
 | 6. 테스트 정리 | ✅ 사실상 완료 | 테스트 157개, plan 10-3 경계 사례 32/32 |
-| 7. 로컬 연동 | ⏳ 남음 | 실제 Electron 앱과 연결해 수치 비교 |
-| 8. 배포 | ⏸ 대기 | 클라우드·도메인 팀 결정 필요 |
+| 7. 로컬 연동 | 🔶 기본 확인 | AI 앱 → 서버 저장·집계 일치 확인 (3-6). 자정 경계·재전송은 남음 |
+| 8. 배포 | ⏳ 진행 중 | Railway로 결정 |
 | 9. 전달 | ⏸ 대기 | 배포 후 |
 | 10. 확장 (합의 후) | ⏸ 대기 | AI·기획 합의 필요 |
 
@@ -93,6 +93,25 @@
 | 계약 | `EventsContractTest`, `ReportsContractTest` | AI 레포 `docs/api/examples/*.json`을 넣었을 때 mock과 같은 응답 |
 | 실제 서버 | `SkeletonIntegrationTest` | 랜덤 포트 Tomcat에서 필터 체인 동작 |
 
+### 3-6. 로컬 연동 (7단계, 10-27)
+
+AI 레포(`main`, `c5b4d86`)를 `MAIN_VITE_API_BASE_URL=http://localhost:8080 npm run dev`로 실행해 실제 앱 이벤트를 받았다.
+
+| 확인 항목 | 결과 |
+| --- | --- |
+| 수집 | 이벤트 10개 (`SESSION_START`, `CALIBRATION_COMPLETED`, `USAGE_SEGMENT` 6, `POSTURE_BAD` 2) 모두 `accepted`, `rejected` 0 |
+| 전송 지연 | `occurred_at` → `received_at` 최대 8초 (앱 큐가 10초 주기로 전송) |
+| 집계 | DB 원본으로 직접 계산한 값과 리포트 일치: 사용 107초, 나쁜 자세 11초 → 유지율 90, 거북목 2회 |
+| 날짜 전환 | 자정 이후 조회 시 전날 값이 `yesterday`로 이동, `week`는 유지 |
+
+남은 확인:
+
+- 자정을 걸친 사용 구간 분할 (앱이 23:57에 종료돼 확인 못 함)
+- 서버 중단 후 앱 큐 재전송과 `duplicated` 처리
+- 여러 시간대에 걸친 `hourly`
+- 앱 리포트 화면: 앱이 아직 `today`를 읽어 서버 응답(`day`)을 표시하지 못한다. 서버 문제가 아니라 #22
+- 처음 실행할 때 `Electron uninstall` 에러가 나면 Electron 바이너리가 다운로드되지 않은 것이다. AI 레포에서 `node node_modules/electron/install.js`로 해결
+
 ---
 
 ## 4. 남은 작업
@@ -101,7 +120,7 @@
 
 | 작업 | 방법 | 비고 |
 | --- | --- | --- |
-| **7. 로컬 연동** | plan 9-3 절차. AI 레포에서 `MAIN_VITE_API_BASE_URL=http://localhost:8080 npm run dev`를 실행하면 mock이 자동으로 꺼진다 | 앱이 아직 `today` 키를 쓰면 리포트 화면이 `day`를 못 읽을 수 있다. FE 반영 여부를 먼저 확인 (#22) |
+| **7. 로컬 연동 (나머지)** | 3-6 "남은 확인" 항목. 자정 경계는 23:58쯤 앱을 켜서 00:01 이후까지 사용 | 기본 연동은 완료 |
 | 운영 SQL 검증 | plan 12장 SQL을 로컬 DB에서 실행해 보기 | 9단계 전달 전에 |
 | 데이터 보관 배치 | 보관 기간 확정 후 오래된 이벤트 삭제 | 기간 미정 (#16) |
 
@@ -117,14 +136,14 @@
 | 9 | 몰림 구간(`peakHours`) 기준 | 최다 시간대, 최소 2회, 동점은 모두 포함 (`PeakHours.MIN_COUNT`) | 기획 |
 | 10 | 시간대 최소 사용 시간 | 기준 없음 (1초라도 있으면 표시) | 기획 |
 | 16 | 데이터 보관 기간 | 미정 | 기획 |
-| 17 | 배포 환경 | 미정 (클라우드, 도메인, 인증서) | 팀 |
+| 17 | 배포 환경 | Railway로 결정. 커스텀 도메인 사용 여부는 미정 (Railway 기본 도메인도 HTTPS 제공) | 팀 |
 | 2, 5 | 3단계 자세 분포, 정시 분할 | 미구현 (10단계) | AI, 기획 |
 
 ### 4-3. 이후 단계
 
-- **8. 배포**: Nginx(TLS) → Spring Boot → MySQL 구성 (plan 11-2).
-  - 운영 프로필에 위 환경 변수를 넣는다.
-  - 읽기 전용 DB 계정을 만들고, 기획자 접속용 SSH 터널을 설정한다.
+- **8. 배포 (Railway)**: Railway가 HTTPS를 처리하므로 plan 11-2의 Nginx는 쓰지 않는다. 구성은 Spring Boot 서비스(`Dockerfile`)와 MySQL 서비스다.
+  - 운영 프로필에 위 환경 변수를 넣는다. DB 값은 Railway MySQL 변수를 참조한다.
+  - 읽기 전용 DB 계정을 만든다. 기획자 접속은 SSH 터널 대신 Railway MySQL의 TCP Proxy를 쓴다.
 - **9. 전달**: 운영 SQL과 접속 가이드를 기획자에게, OpenAPI 문서를 FE에 공유한다.
 - **10. 확장**: 클라이언트 배포 후 설정값(feature flag)으로 켠다. 먼저 켜면 정상 이벤트가 전부 거절된다 (plan 8-2).
 
