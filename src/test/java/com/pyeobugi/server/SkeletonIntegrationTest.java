@@ -68,8 +68,8 @@ class SkeletonIntegrationTest {
 
 	@Test
 	void validDeviceIdPassesFilterAndReachesDispatcher() throws Exception {
-		// 아직 API가 없으므로 필터를 통과하면 404 NOT_FOUND가 나와야 한다
-		HttpResponse<String> response = send(get("/api/reports/summary")
+		// 없는 /api 경로로 보내서, 필터를 통과해 DispatcherServlet까지 가면 404 NOT_FOUND가 나오는지 본다
+		HttpResponse<String> response = send(get("/api/unknown")
 				.header(DeviceIdFilter.HEADER, VALID_DEVICE_ID).build());
 
 		assertThat(response.statusCode()).isEqualTo(404);
