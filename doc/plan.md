@@ -461,7 +461,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 - 이벤트 공통 필드: `eventId`, `type`, `sessionId`, `occurredAt`, `payload`
 - 최상위 body, 이벤트 공통 필드, 타입별 payload 모두 화이트리스트(strict)로 검사한다.
-- `severity` 허용 값은 AI 레포의 `src/shared/posture/score.ts`에서 확인한 뒤 확정한다.
+- `severity` 허용 값: `MILD`, `MODERATE`, `SEVERE` (AI 레포 `score.ts`, `validate.ts` 확인)
 - `bubbleType` 허용 값: `POSTURE`, `STRETCH`, `TIMER_BREAK`, `ENCOURAGE`, `GREETING`
 
 **응답 200**
@@ -601,7 +601,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 | `TraceIdFilter` | 모든 요청 | `req-` + 16진수 8자리를 MDC `traceId`에 넣고 요청이 끝나면 지운다. 로그 패턴(`logging.pattern.correlation`)으로 모든 로그 줄에 `[req-xxxxxxxx]`가 붙는다 |
 | `DeviceIdFilter` | `/api/**`, `OPTIONS` 제외 | UUID v4(대소문자 무관)가 아니면 400 `DEVICE_ID_INVALID`. 통과하면 **소문자로 바꿔** 요청 속성 `deviceId`에 담는다. 대문자로 보낸 기기가 다른 기기로 집계되지 않게 하기 위함 |
 
-> 기기 ID 대소문자 처리는 mock `validate.ts`와 다를 수 있다. 0단계 분석 때 확인한다.
+> mock도 기기 ID를 대소문자 무관하게 받는다. 서버만 추가로 소문자 정규화를 한다 (8-2 "mock과 일부러 다르게 하는 점").
 
 ### 8-2. 이벤트 검증기
 
@@ -614,20 +614,36 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 **2단계: 이벤트별 검증** (`events`는 `JsonNode`로 받아 하나씩 직접 검사)
 
-FE 수정안에 따라 **금지 필드가 다른 오류와 같이 있으면 `FORBIDDEN_FIELD`가 우선**이다. 그래서 금지 필드 검사(1, 3)를 값 검사(4, 5)보다 앞에 둔다.
+검사 순서는 **mock `validate.ts`의 순서를 그대로 따르되, FE 수정안(10-27)의 "`FORBIDDEN_FIELD` 우선" 규칙을 위해 금지 필드 검사(2, 3)만 맨 앞으로 올린다.** 금지 필드가 없는 이벤트는 mock과 같은 code가 나온다.
 
-| 순서 | 검사 | 실패 code |
-| --- | --- | --- |
-| 1 | 이벤트가 객체인지, 공통 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` |
-| 2 | `type`이 정의된 값인지 (타입을 알아야 payload 화이트리스트를 정할 수 있음) | `UNKNOWN_TYPE` |
-| 3 | payload에 타입별 허용 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` |
-| 4 | `eventId`, `sessionId`가 UUID v4인지, `occurredAt`이 `+09:00`·초 단위 형식인지, payload 값의 형식과 범위 | `INVALID_PAYLOAD` |
-| 5 | `occurredAt`(`USAGE_SEGMENT`는 `startedAt`·`endedAt`도)이 현재 +5분 ~ 과거 30일 범위인지 | `OCCURRED_AT_OUT_OF_RANGE` |
+| 순서 | 검사 | 실패 code | mock 순서 |
+| --- | --- | --- | --- |
+| 1 | 이벤트가 JSON 객체인지 | `INVALID_PAYLOAD` | 1 |
+| 2 | 공통 필드(`eventId`, `type`, `sessionId`, `occurredAt`, `payload`) 외 필드가 없는지 | `FORBIDDEN_FIELD` | 2 |
+| 3 | `type`이 정의된 값이고 payload가 객체일 때, 타입별 허용 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` | **7 → 앞으로** |
+| 4 | `eventId`, `sessionId`가 UUID v4인지 (대소문자 무관) | `INVALID_PAYLOAD` | 3 |
+| 5 | `type`이 정의된 값인지 (없거나 문자열이 아니어도 여기) | `UNKNOWN_TYPE` | 4 |
+| 6 | `occurredAt` 형식 | `INVALID_PAYLOAD` | 5 |
+| 7 | `occurredAt`이 현재 +5분 ~ 과거 30일 범위인지 (경계 포함) | `OCCURRED_AT_OUT_OF_RANGE` | 6 |
+| 8 | `payload`가 객체인지 | `INVALID_PAYLOAD` | 7 |
+| 9 | payload 필드가 **모두 있고** 타입·허용 값이 맞는지 | `INVALID_PAYLOAD` | 8 |
+| 10 | (`USAGE_SEGMENT`) `startedAt`·`endedAt` 범위 | `OCCURRED_AT_OUT_OF_RANGE` | 9 |
+| 11 | (`USAGE_SEGMENT`) 아래 추가 규칙 | `INVALID_PAYLOAD` | 10 |
 
-- 이벤트가 객체가 아니면 `INVALID_PAYLOAD`, `type`이 없거나 문자열이 아니면 `UNKNOWN_TYPE`으로 둔다.
-- 타입을 모르면 payload 화이트리스트를 정할 수 없으므로, `type`이 틀린 이벤트의 payload 금지 필드는 `UNKNOWN_TYPE`으로 응답된다.
+**mock과 일부러 다르게 하는 점** (FE 10-27 수정안이 mock보다 새 기준)
 
-> `FORBIDDEN_FIELD` 외의 순서와 `eventId` 형식 오류 시의 code는 **AI 레포 `src/main/mock/validate.ts`의 동작에 맞춘다.** 위 표는 초안이며, 옮기면서 다른 점이 있으면 mock 쪽을 따른다.
+| 항목 | mock | 서버 | 영향 |
+| --- | --- | --- | --- |
+| 시각 형식 | 아무 오프셋, 밀리초 허용 | `+09:00`·초 단위만 | 없음. 클라이언트는 항상 `toKstIso()`로 `+09:00`·초 단위를 보낸다 |
+| 금지 필드 + 다른 오류 | 먼저 걸린 code (예: `eventId` 오류 + `pitch` → `INVALID_PAYLOAD`) | `FORBIDDEN_FIELD` | 거절된다는 결과는 같고 code만 다름 |
+| 기기 ID 대소문자 | 대소문자 무관, 받은 그대로 저장 | 대소문자 무관, **소문자로 바꿔 저장** | 없음. 클라이언트는 `randomUUID()`(소문자)를 쓴다 |
+
+**mock에 맞춰 구현할 세부 동작**
+
+- payload 정수 필드는 `Number.isInteger` 기준이라 `60.0`도 정수로 받는다. 서버도 소수부가 0인 숫자는 정수로 받는다.
+- payload에 정의된 필드가 하나라도 빠지면 `INVALID_PAYLOAD` (예: `POSTURE_BAD`에 `severity` 없음).
+- `rejected.eventId`는 요청의 `eventId`가 UUID v4일 때만 받은 그대로 넣는다.
+- 중복 판정은 검증을 통과한 이벤트에만 한다. 이미 저장된 `eventId`라도 검증에 걸리면 `rejected`다.
 
 **`USAGE_SEGMENT` 추가 규칙** (위반 시 `INVALID_PAYLOAD`)
 
@@ -830,8 +846,8 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | `day` 유지율 | mood | 문구 (예시) |
 | --- | --- | --- |
 | 80% 이상 | `GOOD` | 오늘 잘했어요 |
-| 50% 이상 | `NORMAL` | (기획 확정 필요) |
-| 50% 미만 | `BAD` | (기획 확정 필요) |
+| 50% 이상 | `NORMAL` | 조금만 더 신경 써 볼까요? |
+| 50% 미만 | `BAD` | 목을 쭉 펴 볼 시간이에요 |
 | `day` 사용 시간 0 | — | `comment: null` |
 
 - 과거 날짜를 조회해도 문구가 "오늘 ..."로 나가지 않도록 문구 확정 시 같이 정한다 (14장 #8).
@@ -855,7 +871,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 ### 8-9. CORS
 
 - 이벤트 전송은 Electron main 프로세스(Node.js)에서 하므로 CORS 대상이 아니다.
-- 리포트 조회도 main 프로세스에서 하는지 AI 파트에 확인한다. 렌더러(renderer)에서 직접 호출한다면 `X-Device-Id`가 커스텀 헤더라서 프리플라이트(preflight) `OPTIONS` 요청이 생기므로, 개발 서버 origin과 패키징 앱 origin을 허용 목록에 넣는다.
+- 리포트 조회도 main 프로세스(`src/main/api/client.ts`)에서 한다 (AI 레포 확인). 렌더러는 IPC로 결과만 받으므로 **CORS 설정은 필요 없다.** 나중에 렌더러에서 직접 호출하게 바뀌면 `X-Device-Id`가 커스텀 헤더라 프리플라이트 `OPTIONS`가 생기므로 그때 origin 허용 목록을 넣는다.
 
 ---
 
@@ -901,7 +917,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 3. 앱에서 기준 잡기 → 고개 숙이기 → 1분 이상 사용 → 리포트 열기
 4. `SELECT * FROM events ORDER BY id DESC LIMIT 20;`으로 저장 확인, 앱 리포트 수치와 비교
 
-> 개발 모드에서는 mock이 켜지므로, 환경 변수만으로 실제 서버로 가는지 mock을 따로 꺼야 하는지 AI 파트에 확인한다 (14장).
+> mock은 `개발 모드 && MAIN_VITE_API_BASE_URL 미지정`일 때만 켜진다 (`src/main/index.ts`). 환경 변수만 넣으면 mock 없이 실제 서버로 간다.
 
 ---
 
@@ -1088,18 +1104,18 @@ ORDER BY kst_hour;
 | --- | --- | --- | --- | --- |
 | 1 | 이벤트 구조 | 기획서의 "세션 종료(초) + 정자세 회복" 대신 FE 초안의 `USAGE_SEGMENT` 채택 | 기획 | 수집·집계 전체 |
 | 2 | 3단계 자세 분포 | AI는 나쁜 자세를 하나로 판정(ADR 0002). 살짝 숙임 추가 시 `badDurationSec` = 살짝 숙임 + 거북목, `mildDurationSec` 추가 제안. 살짝 숙임도 유지율에서 빠지는지 확인 | 기획, AI | 분포 차트, 유지율 정의 |
-| 3 | `severity` 허용 값 | `score.ts` 확인 필요 | AI | 검증 규칙 |
-| 4 | 개발 모드 mock 끄기 | 환경 변수만으로 실제 서버로 가는지 | AI | 로컬 연동 |
+| 3 | ~~`severity` 허용 값~~ | **확정**: `MILD`, `MODERATE`, `SEVERE` | AI | 검증 규칙 |
+| 4 | ~~개발 모드 mock 끄기~~ | **확정**: 환경 변수를 넣으면 mock이 자동으로 꺼짐 | AI | 로컬 연동 |
 | 5 | 정시 분할 | `USAGE_SEGMENT`를 매 정시에서 끊어 주기 (현재 오차는 시간대당 최대 1분 수준) | AI | 시간대별 차트 정확도 |
 | 6 | 거북목 횟수 문구 | `POSTURE_BAD`에 고개 숙임도 포함됨. 화면 문구 조정 여부 | 기획 | 리포트 화면 |
 | 7 | 지난주 비교 기간 | 지난주 전체 vs 지난주 같은 요일까지 | 기획 | `lastWeek` 계산 |
-| 8 | 코멘트 문구 | mood 기준은 mock과 같은 80/50, 문구 확정 필요 | 기획 | `comment` |
+| 8 | 코멘트 문구 | mood 기준과 문구는 mock 것으로 시작 (8-6). 기획 확정, 과거 날짜 조회 시 "오늘" 문구 처리 필요 | 기획 | `comment` |
 | 9 | 몰림 구간 기준 | 최소 몇 회부터 "몰림"인지, 동점 처리, 문구 생성 주체 (제안: 서버는 `peakHours`, 문구는 FE) | 기획, FE | `peakHours` |
 | 10 | 시간대 최소 사용 시간 | 2~3분짜리 시간대도 막대로 보여줄지 | 기획 | `hourly` |
 | 11 | 시간 표기 | 공통 규칙은 24시간제인데 시안에 "오후 8시" 표기 혼재 | 기획 | FE 표시 |
 | 12 | 뽀모도로 카드 비교 | "어제 대비"인지 "이번 주 누적"인지 | 기획 | FE 표시 |
 | 13 | 기본 설정값 이벤트 | 온보딩 완료 시 `SETTINGS_CHANGED` 1회 전송 | AI | 운영 SQL 4번 |
-| 14 | 리포트 호출 위치 | main 프로세스인지 렌더러인지 | AI | CORS 설정 |
+| 14 | ~~리포트 호출 위치~~ | **확정**: main 프로세스. CORS 불필요 | AI | CORS 설정 |
 | 15 | 엔드포인트 이름 | 기획서 `GET /report` → `GET /api/reports/summary`로 통일 | 기획 | 문서 정합성 |
 | 16 | 데이터 보관 기간 | 기간 제안 후 확정 | 기획 | 삭제 배치 |
 | 17 | 배포 환경 | 클라우드, 도메인, 인증서 | 팀 | 배포 |
@@ -1107,6 +1123,7 @@ ORDER BY kst_hour;
 | 19 | 확장 필드 필요 여부 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`이 아직 필요한지. 어제는 `date`로 재조회 가능, `lastWeek`는 주 단위 비교가 필요하면 추가 | FE | 7-3 확장 필드 |
 | 20 | 미래 `date` 처리 | 제안: `200` + 빈 응답(`hasData: false`). 400이 필요하면 변경 | FE | 7-3 |
 | 21 | 시 경계 구간 집계 | **확정 (10-27)**: `startedAt`의 시로 집계 (분할하지 않음) | FE | `hourly` |
+| 22 | mock 갱신 | mock(`validate.ts`, `summary.ts`, `api.ts`)이 FE 10-27 수정안 이전 기준. 시각 형식, `FORBIDDEN_FIELD` 우선, `date` 파라미터, `today`→`day`, `hourly`, `hasData` 기준을 mock에도 반영해 달라고 요청 | AI, FE | 계약 테스트, 로컬 개발 |
 
 **백엔드가 회신할 항목** (AI 레포 인수인계 문서 기준)
 
