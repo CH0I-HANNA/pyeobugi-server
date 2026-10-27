@@ -741,14 +741,12 @@ public PostEventsResponse ingest(String deviceId, List<JsonNode> events) {
 public interface PeriodStats {
     Long getUsageSec();
     Long getBadSec();
-    Long getMildSec();
-    Long getMildRows();
     Long getTurtleCount();
     Long getPomodoroCount();
 }
 
 public interface HourlyStats {
-    Integer getKstHour();
+    Long getKstHour();
     Long getUsageSec();
     Long getBadSec();
 }
@@ -764,8 +762,6 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
         SELECT
           CAST(COALESCE(SUM(duration_sec), 0)      AS SIGNED) AS usageSec,
           CAST(COALESCE(SUM(bad_duration_sec), 0)  AS SIGNED) AS badSec,
-          CAST(COALESCE(SUM(mild_duration_sec), 0) AS SIGNED) AS mildSec,
-          COUNT(mild_duration_sec)                            AS mildRows,
           CAST(COALESCE(SUM(type = 'POSTURE_BAD'), 0)        AS SIGNED) AS turtleCount,
           CAST(COALESCE(SUM(type = 'POMODORO_COMPLETED'), 0) AS SIGNED) AS pomodoroCount
         FROM events
@@ -779,7 +775,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 
     /** 시간대별 유지율: 기록 있는 시간대만 반환, 24칸 채우기는 Java에서 */
     @Query(value = """
-        SELECT kst_hour                              AS kstHour,
+        SELECT CAST(kst_hour AS SIGNED)              AS kstHour,
                CAST(SUM(duration_sec) AS SIGNED)     AS usageSec,
                CAST(SUM(bad_duration_sec) AS SIGNED) AS badSec
         FROM events
@@ -802,6 +798,8 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 }
 ```
 
+- `mild_duration_sec` 집계(`mildSec`, `mildRows`)는 3단계 분포를 만들 때(4단계) 추가한다.
+- `kst_hour`(`TINYINT`)도 드라이버가 돌려주는 타입이 환경마다 다를 수 있어 `CAST(... AS SIGNED)`로 `Long`에 맞춘다.
 - MySQL의 `SUM()`은 결과를 `DECIMAL`로 돌려주므로, 프로젝션의 `Long` getter와 타입이 어긋나지 않도록 SQL에서 `CAST(... AS SIGNED)`로 정수 변환한다.
 - `hasData`는 요청 날짜 기준이라 별도 쿼리 없이 `day`의 `PeriodStats`로 판정한다 (`usageSec > 0 || turtleCount > 0 || pomodoroCount > 0`). `USAGE_SEGMENT`의 `duration_sec`이 0이면 `usageSec`에 더해지지 않으므로 기존 `duration_sec > 0` 조건과 같다.
 - 요청 한 번에 쿼리는 `day`, `week`, `hourly` 3번이다.
@@ -933,7 +931,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - 시각이 들어간 예시는 테스트 시계(`Clock`)를 고정해서 비교한다. 서버는 `KstClock`을 주입받아 현재 시각을 얻도록 만든다.
 - 계약 테스트(`EventsContractTest`)의 시계는 예시 리포트의 `generatedAt`과 같은 `2026-10-25T21:35:00+09:00`으로 고정한다.
 - `error-device-id`는 상태 코드와 `code`만 비교한다. mock의 `message`는 영어, 서버는 한국어라서다.
-- `reports-summary*.response.json`은 FE 10-27 수정안 이전 형식(`today`, `hasData` 전체 기간)이다. 3단계에서 mock이 갱신된 예시로 바꾸거나 차이를 정리한다 (14장 #22).
+- `reports-summary*.response.json`은 FE 10-27 수정안 이전 형식(`today`, `hasData` 전체 기간)이다. `ReportsContractTest`는 `today` ↔ `day`로 바꿔 `hasData`, `generatedAt`, `day`, `week`, `comment`를 비교하고 새 필드(`date`, `hourly`)는 비교하지 않는다. mock이 갱신되면 예시를 다시 복사해 그대로 비교한다 (14장 #22).
 - `traceId`, `generatedAt`처럼 매번 달라지는 값은 비교에서 제외한다.
 
 ### 10-3. 경계 사례 체크리스트
@@ -956,20 +954,20 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - [x] 밀리초 포함 시각 (`...:00.000+09:00`) → `INVALID_PAYLOAD`
 - [x] 금지 필드 + 다른 오류(예: `durationSec` 불일치) 동시 → `FORBIDDEN_FIELD`
 - [x] `events` 빈 배열 → 400 `INVALID_REQUEST`
-- [ ] 유지율 반올림 (예: 78.5 → 79), 사용 시간 0 → `null`
-- [ ] 주간 유지율이 일별 평균이 아니라 합계 기준인지
+- [x] 유지율 반올림 (예: 78.5 → 79), 사용 시간 0 → `null`
+- [x] 주간 유지율이 일별 평균이 아니라 합계 기준인지
 - [ ] 자세 분포 비율 합 100
-- [ ] 월요일 00:00 주간 경계
+- [x] 월요일 00:00 주간 경계
 - [ ] Rate Limit 초과 시 429 + 본문 `retryAfter` + `Retry-After` 헤더
-- [ ] `date` 생략 → 오늘, 응답 `date`에 오늘 날짜
-- [ ] `date=2026-02-30`, `date=2026-1-5`, `date=abc` → 400 `INVALID_REQUEST`
-- [ ] 미래 `date` → 200 + `hasData: false`
-- [ ] 과거 날짜(수요일) 조회 시 `week` = 그 주 월요일 ~ 수요일, 목요일 이후 기록 미포함
-- [ ] 일요일 조회 시 `week`에 그 주 월~일 포함, 다음 날(월요일) 조회 시 새 주
-- [ ] `hourly` 항상 24개, 기록 없는 시간 `null`
-- [ ] `09:59:30 ~ 10:00:30` 구간 → 9시로 집계
-- [ ] 요청 날짜에 기록 없고 같은 주 다른 날에 기록 있음 → `hasData: false`, `week`는 값 있음
-- [ ] `POSTURE_BAD`만 있는 날 → `hasData: true`, `day.postureKeepRate: null`
+- [x] `date` 생략 → 오늘, 응답 `date`에 오늘 날짜
+- [x] `date=2026-02-30`, `date=2026-1-5`, `date=abc` → 400 `INVALID_REQUEST`
+- [x] 미래 `date` → 200 + `hasData: false`
+- [x] 과거 날짜(수요일) 조회 시 `week` = 그 주 월요일 ~ 수요일, 목요일 이후 기록 미포함
+- [x] 일요일 조회 시 `week`에 그 주 월~일 포함, 다음 날(월요일) 조회 시 새 주
+- [x] `hourly` 항상 24개, 기록 없는 시간 `null`
+- [x] `09:59:30 ~ 10:00:30` 구간 → 9시로 집계
+- [x] 요청 날짜에 기록 없고 같은 주 다른 날에 기록 있음 → `hasData: false`, `week`는 값 있음
+- [x] `POSTURE_BAD`만 있는 날 → `hasData: true`, `day.postureKeepRate: null`
 
 ---
 
