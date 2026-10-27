@@ -230,7 +230,7 @@ pyeobugi-server/
     │   │   ├── PyeobugiServerApplication.java
     │   │   ├── common/
     │   │   │   ├── filter/        # TraceIdFilter, DeviceIdFilter, RateLimitFilter, BodySizeFilter
-    │   │   │   ├── error/         # ErrorCode, ErrorResponse, ApiException, GlobalExceptionHandler
+    │   │   │   ├── error/         # ErrorCode, ErrorResponse, ApiException, GlobalExceptionHandler, ErrorResponseWriter(필터용)
     │   │   │   └── time/          # KstClock, KstTimeUtils (KST 변환, 날짜/시간대 계산)
     │   │   ├── config/            # TimeConfig(Clock 빈), CorsConfig, JacksonConfig, OpenApiConfig, RateLimitProperties
     │   │   ├── event/
@@ -407,11 +407,15 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 - 형식은 `{ code, message?, traceId?, retryAfter? }`. FE는 `code`만 필수로 보고 나머지는 없어도 동작한다.
 - 서버는 `code`, `message`, `traceId`를 항상 넣고, `retryAfter`는 429에서만 넣는다.
+- 컨트롤러에서 난 예외는 `GlobalExceptionHandler`가, 필터에서 난 오류는 `ErrorResponseWriter`가 같은 형식으로 응답한다. 그 밖의 Spring MVC 표준 예외(JSON 파싱 실패, 파라미터 타입 오류 등)는 상태 코드 기준으로 400 → `INVALID_REQUEST`, 5xx → `INTERNAL_ERROR`로 바꾼다.
+- 500 응답의 `message`에는 예외 내용을 넣지 않는다 (내부 정보 노출 방지). 예외는 서버 로그에만 남긴다.
 
 | 상황 | HTTP | code | 클라이언트 처리 |
 | --- | --- | --- | --- |
 | 기기 ID 누락, UUID 형식 위반 | 400 | `DEVICE_ID_INVALID` | 버그로 보고 배치를 남긴 채 재시도 |
 | 요청 구조 오류 (최상위 모르는 필드, `events` 빈 배열 등), 리포트 `date` 오류 | 400 | `INVALID_REQUEST` | 배치 폐기 |
+| 존재하지 않는 경로 | 404 | `NOT_FOUND` | 버그로 보고 확인 (FE 초안에 없던 코드) |
+| 지원하지 않는 HTTP 메서드 | 405 | `METHOD_NOT_ALLOWED` | 버그로 보고 확인 (FE 초안에 없던 코드) |
 | 이벤트 101개 이상, 본문 64KB 초과 | 413 | `PAYLOAD_TOO_LARGE` | 배치를 반으로 나눠 재전송, 1개짜리면 폐기 |
 | 호출 한도 초과 | 429 | `RATE_LIMITED` | `retryAfter`초 후 재시도 |
 | 서버 오류 | 5xx | `INTERNAL_ERROR` | 큐 유지 후 재시도 |
