@@ -19,7 +19,7 @@
 | 시각 형식 | 오프셋 포함 ISO 8601 | **`+09:00` 오프셋, 초 단위만 허용** (`Z`, 다른 오프셋, 밀리초는 `INVALID_PAYLOAD`) |
 | 거부 사유 우선순위 | 검사 순서대로 | **`FORBIDDEN_FIELD` 우선** |
 | 에러 body | `{ code, message, traceId }` | `{ code, message?, traceId?, retryAfter? }` (FE는 `code`만 필수) |
-| 기존 확장 필드 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 요청 날짜 기준으로 재정의, FE 수요 확인 전까지 보류 (14장 #19) |
+| 기존 확장 필드 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 요청 날짜 기준으로 재정의해 기본 응답에 **추가** (14장 #19) |
 
 **v2 변경 사항**
 
@@ -493,7 +493,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 ### 7-3. `GET /api/reports/summary`
 
-FE 26-10-27 수정안(`hasData`, `generatedAt`, `date`, `day`, `week`, `hourly`, `comment`)을 **기본 응답**으로 한다. v2에서 제안했던 확장 필드(`yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`)는 요청 날짜 기준으로 정의만 바꿔 두고, FE 수요가 확인되면 **추가만** 한다 (14장 #19).
+FE 26-10-27 수정안(`hasData`, `generatedAt`, `date`, `day`, `week`, `hourly`, `comment`)을 **기본 응답**으로 하고, v2에서 제안했던 확장 필드(`yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`)를 요청 날짜 기준으로 바꿔 **추가**했다. FE 수정안의 필드는 이름과 의미를 바꾸지 않았으므로, 확장 필드를 쓰지 않는 클라이언트도 그대로 동작한다.
 
 **요청**
 
@@ -565,14 +565,14 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 - `Cache-Control: no-store`
 - 서버 처리 시간 목표 1초 이내
 
-**확장 필드 (보류, 14장 #19)**
+**확장 필드** (응답 순서: `day` 다음 `yesterday`, `week` 다음 `lastWeek`, `hourly` 다음 `turtleNeckTimeline`, `distribution`)
 
 | 필드 | 정의 (요청 날짜 `D` 기준) |
 | --- | --- |
-| `yesterday` | `D − 1일` 하루 |
-| `lastWeek` | `D`가 속한 주의 지난주 (전체 vs 같은 요일까지, 14장 #7) |
+| `yesterday` | `D − 1일` 하루. `D`가 월요일이면 지난주 일요일 |
+| `lastWeek` | 지난주 월요일 ~ **지난주 같은 요일**(`D − 7일`). 이번 주 `week`와 같은 길이로 비교한다 (14장 #7 제안값, `ReportService`에서 바꿈) |
 | `turtleNeckTimeline.occurredAt` | `D`의 `POSTURE_BAD` 발생 시각, 시간순 |
-| `turtleNeckTimeline.peakHours` | 시간대별 개수 상위 구간 (14장 #9) |
+| `turtleNeckTimeline.peakHours` | 감지 횟수가 가장 많은 시간대. **최소 2회**, 동점은 모두 포함, 오름차순. 없으면 `[]` (14장 #9 제안값, `PeakHours.MIN_COUNT`) |
 | `distribution` | `D`의 자세 분포 (8-6). `D` 사용 시간이 0이면 `null` |
 
 ---
@@ -802,7 +802,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - `kst_hour`(`TINYINT`)도 드라이버가 돌려주는 타입이 환경마다 다를 수 있어 `CAST(... AS SIGNED)`로 `Long`에 맞춘다.
 - MySQL의 `SUM()`은 결과를 `DECIMAL`로 돌려주므로, 프로젝션의 `Long` getter와 타입이 어긋나지 않도록 SQL에서 `CAST(... AS SIGNED)`로 정수 변환한다.
 - `hasData`는 요청 날짜 기준이라 별도 쿼리 없이 `day`의 `PeriodStats`로 판정한다 (`usageSec > 0 || turtleCount > 0 || pomodoroCount > 0`). `USAGE_SEGMENT`의 `duration_sec`이 0이면 `usageSec`에 더해지지 않으므로 기존 `duration_sec > 0` 조건과 같다.
-- 요청 한 번에 쿼리는 `day`, `week`, `hourly` 3번이다.
+- 요청 한 번에 쿼리는 `day`, `yesterday`, `week`, `lastWeek`, `hourly`, 거북목 시각 6번이다. 모두 `idx_agg` 인덱스를 탄다.
 
 계산 로직(Java)
 
@@ -810,7 +810,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - `hourly`: 길이 24 배열을 `null`로 채운 뒤 쿼리 결과의 `kstHour` 칸만 유지율로 채운다
 - 유지율: `Math.round((usage − bad) * 100.0 / usage)`, `usage == 0`이면 `null`
 - 주간 유지율은 일별 유지율의 평균이 아니라 **주간 합계**로 계산
-- `peakHours`: 거북목 시점 목록을 시간대별로 세어 상위 구간 추출
+- `peakHours`: 거북목 시점 목록을 시간대별로 세어 상위 구간 추출 (`PeakHours`)
 - 반올림은 `RoundingMode.HALF_UP`으로 통일하고, mock의 `summary.ts`와 결과가 같은지 테스트로 확인
 
 ### 8-6. 자세 분포와 코멘트
@@ -956,7 +956,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - [x] `events` 빈 배열 → 400 `INVALID_REQUEST`
 - [x] 유지율 반올림 (예: 78.5 → 79), 사용 시간 0 → `null`
 - [x] 주간 유지율이 일별 평균이 아니라 합계 기준인지
-- [ ] 자세 분포 비율 합 100
+- [x] 자세 분포 비율 합 100
 - [x] 월요일 00:00 주간 경계
 - [ ] Rate Limit 초과 시 429 + 본문 `retryAfter` + `Retry-After` 헤더
 - [x] `date` 생략 → 오늘, 응답 `date`에 오늘 날짜
@@ -1076,7 +1076,7 @@ ORDER BY kst_hour;
 | **1. 뼈대** | 4-3 설정으로 프로젝트 생성, 프로필 분리, JPA·시간대 설정(6-3, 6-4), Flyway V1 스키마, `EventEntity`, 에러 포맷, `TraceIdFilter`, `DeviceIdFilter`, springdoc 설정 | 서버가 MySQL에 연결되어 실행되고, 잘못된 헤더 요청 시 400 `DEVICE_ID_INVALID` + traceId 응답 |
 | **2. 수집 API** | 최상위 구조 검증, 이벤트별 검증기, `EventRepository.insertIgnore` + `EventService`, `BodySizeFilter` | 중복 재전송 시 `duplicated`로 집계, 금지 필드 `rejected` |
 | **3. 조회 API (기본)** | `date` 파라미터, `day`, `week`, `hourly`(24개), `hasData`, `comment` | FE 26-10-27 수정안의 응답과 일치 |
-| **4. 조회 API (확장, FE 수요 확인 후)** | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 분포 비율 합 100 테스트 통과 |
+| **4. 조회 API (확장)** | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 분포 비율 합 100 테스트 통과 |
 | **5. 보호 기능** | `RateLimitFilter`, IP HMAC 해시, 로그 마스킹, CORS | 한도 초과 시 429 + `retryAfter` |
 | **6. 테스트 정리** | 계약 테스트, 10-3 경계 사례 체크리스트 전부 통과 | 예시 JSON 전부 일치 |
 | **7. 로컬 연동** | 9-3 절차로 실제 클라이언트와 연결 | 앱 리포트 수치와 DB 집계 일치 |
@@ -1096,9 +1096,9 @@ ORDER BY kst_hour;
 | 4 | ~~개발 모드 mock 끄기~~ | **확정**: 환경 변수를 넣으면 mock이 자동으로 꺼짐 | AI | 로컬 연동 |
 | 5 | 정시 분할 | `USAGE_SEGMENT`를 매 정시에서 끊어 주기 (현재 오차는 시간대당 최대 1분 수준) | AI | 시간대별 차트 정확도 |
 | 6 | 거북목 횟수 문구 | `POSTURE_BAD`에 고개 숙임도 포함됨. 화면 문구 조정 여부 | 기획 | 리포트 화면 |
-| 7 | 지난주 비교 기간 | 지난주 전체 vs 지난주 같은 요일까지 | 기획 | `lastWeek` 계산 |
+| 7 | 지난주 비교 기간 | **같은 요일까지로 구현** (제안값). 지난주 전체가 필요하면 변경 | 기획 | `lastWeek` 계산 |
 | 8 | 코멘트 문구 | mood 기준과 문구는 mock 것으로 시작 (8-6). 기획 확정, 과거 날짜 조회 시 "오늘" 문구 처리 필요 | 기획 | `comment` |
-| 9 | 몰림 구간 기준 | 최소 몇 회부터 "몰림"인지, 동점 처리, 문구 생성 주체 (제안: 서버는 `peakHours`, 문구는 FE) | 기획, FE | `peakHours` |
+| 9 | 몰림 구간 기준 | **최다 시간대·최소 2회·동점 모두로 구현** (제안값). 문구는 FE가 `peakHours`로 생성 | 기획, FE | `peakHours` |
 | 10 | 시간대 최소 사용 시간 | 2~3분짜리 시간대도 막대로 보여줄지 | 기획 | `hourly` |
 | 11 | 시간 표기 | 공통 규칙은 24시간제인데 시안에 "오후 8시" 표기 혼재 | 기획 | FE 표시 |
 | 12 | 뽀모도로 카드 비교 | "어제 대비"인지 "이번 주 누적"인지 | 기획 | FE 표시 |
@@ -1108,7 +1108,7 @@ ORDER BY kst_hour;
 | 16 | 데이터 보관 기간 | 기간 제안 후 확정 | 기획 | 삭제 배치 |
 | 17 | 배포 환경 | 클라우드, 도메인, 인증서 | 팀 | 배포 |
 | 18 | ~~`hasData` 범위~~ | **확정 (10-27)**: 요청 날짜(`day`) 기준 | FE | 빈 상태 화면 |
-| 19 | 확장 필드 필요 여부 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`이 아직 필요한지. 어제는 `date`로 재조회 가능, `lastWeek`는 주 단위 비교가 필요하면 추가 | FE | 7-3 확장 필드 |
+| 19 | ~~확장 필드 필요 여부~~ | **구현 완료 (10-27)**: 4개 필드를 응답에 추가. FE에 필드 정의 공유 필요 | FE | 7-3 확장 필드 |
 | 20 | 미래 `date` 처리 | 제안: `200` + 빈 응답(`hasData: false`). 400이 필요하면 변경 | FE | 7-3 |
 | 21 | 시 경계 구간 집계 | **확정 (10-27)**: `startedAt`의 시로 집계 (분할하지 않음) | FE | `hourly` |
 | 22 | mock 갱신 | mock(`validate.ts`, `summary.ts`, `api.ts`)이 FE 10-27 수정안 이전 기준. 시각 형식, `FORBIDDEN_FIELD` 우선, `date` 파라미터, `today`→`day`, `hourly`, `hasData` 기준을 mock에도 반영해 달라고 요청 | AI, FE | 계약 테스트, 로컬 개발 |

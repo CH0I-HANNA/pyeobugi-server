@@ -1,5 +1,6 @@
 package com.pyeobugi.server.report.api;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
@@ -181,7 +182,12 @@ class ReportApiIntegrationTest {
 				.andExpect(jsonPath("$.day.pomodoroCount").value(0))
 				.andExpect(jsonPath("$.day.usageSeconds").value(0))
 				.andExpect(jsonPath("$.week.postureKeepRate").value(nullValue()))
+				.andExpect(jsonPath("$.yesterday.usageSeconds").value(0))
+				.andExpect(jsonPath("$.lastWeek.usageSeconds").value(0))
 				.andExpect(jsonPath("$.hourly", hasSize(24)))
+				.andExpect(jsonPath("$.turtleNeckTimeline.occurredAt", hasSize(0)))
+				.andExpect(jsonPath("$.turtleNeckTimeline.peakHours", hasSize(0)))
+				.andExpect(jsonPath("$.distribution").value(nullValue()))
 				.andExpect(jsonPath("$.comment").value(nullValue()));
 	}
 
@@ -195,7 +201,10 @@ class ReportApiIntegrationTest {
 				.andExpect(jsonPath("$.hasData").value(false))
 				.andExpect(jsonPath("$.date").value("2026-10-09"))
 				.andExpect(jsonPath("$.week.usageSeconds").value(0))
-				.andExpect(jsonPath("$.hourly", hasSize(24)));
+				.andExpect(jsonPath("$.yesterday.usageSeconds").value(0))
+				.andExpect(jsonPath("$.hourly", hasSize(24)))
+				.andExpect(jsonPath("$.turtleNeckTimeline.occurredAt", hasSize(0)))
+				.andExpect(jsonPath("$.distribution").value(nullValue()));
 	}
 
 	@ParameterizedTest
@@ -211,6 +220,71 @@ class ReportApiIntegrationTest {
 		mockMvc.perform(get("/api/reports/summary"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("DEVICE_ID_INVALID"));
+	}
+
+	@Test
+	void yesterdayIsPreviousDayEvenAcrossWeekBoundary() throws Exception {
+		segment("2026-10-04T10:00:00", 60, 30);       // 일
+		segment("2026-10-07T10:00:00", 60, 6);        // 수
+		event("POMODORO_COMPLETED", "2026-10-07T10:30:00", "{}");
+		save();
+
+		summary(null)
+				.andExpect(jsonPath("$.yesterday.postureKeepRate").value(90))
+				.andExpect(jsonPath("$.yesterday.usageSeconds").value(60))
+				.andExpect(jsonPath("$.yesterday.pomodoroCount").value(1));
+		summary("2026-10-05")
+				.andExpect(jsonPath("$.yesterday.postureKeepRate").value(50));
+	}
+
+	@Test
+	void lastWeekIsUpToSameWeekdayOfPreviousWeek() throws Exception {
+		segment("2026-09-28T10:00:00", 60, 0);        // 지난주 월
+		segment("2026-10-01T10:00:00", 60, 60);       // 지난주 목 (같은 요일, 포함)
+		segment("2026-10-02T10:00:00", 60, 60);       // 지난주 금 (제외)
+		event("POSTURE_BAD", "2026-10-01T10:00:10", "{\"severity\":\"MILD\"}");
+		save();
+
+		summary(null)
+				.andExpect(jsonPath("$.lastWeek.usageSeconds").value(120))
+				.andExpect(jsonPath("$.lastWeek.postureKeepRate").value(50))
+				.andExpect(jsonPath("$.lastWeek.turtleNeckCount").value(1))
+				.andExpect(jsonPath("$.week.usageSeconds").value(0));
+	}
+
+	@Test
+	void turtleNeckTimelineIsSortedWithPeakHours() throws Exception {
+		// 클라이언트는 나쁜 자세 시작 시각으로 되돌려 기록하므로 순서가 섞여 온다
+		event("POSTURE_BAD", "2026-10-08T19:00:00", "{\"severity\":\"MILD\"}");
+		event("POSTURE_BAD", "2026-10-08T14:05:40", "{\"severity\":\"MODERATE\"}");
+		event("POSTURE_BAD", "2026-10-08T10:47:12", "{\"severity\":\"MILD\"}");
+		event("POSTURE_BAD", "2026-10-08T14:30:00", "{\"severity\":\"SEVERE\"}");
+		event("POSTURE_BAD", "2026-10-08T19:10:00", "{\"severity\":\"MILD\"}");
+		event("POSTURE_BAD", "2026-10-07T14:00:00", "{\"severity\":\"MILD\"}");   // 다른 날
+		save();
+
+		summary(null)
+				.andExpect(jsonPath("$.turtleNeckTimeline.occurredAt", contains(
+						"2026-10-08T10:47:12+09:00", "2026-10-08T14:05:40+09:00", "2026-10-08T14:30:00+09:00",
+						"2026-10-08T19:00:00+09:00", "2026-10-08T19:10:00+09:00")))
+				.andExpect(jsonPath("$.turtleNeckTimeline.peakHours", contains(14, 19)));
+	}
+
+	@Test
+	void distributionSplitsDayUsageIntoGoodAndTurtle() throws Exception {
+		segment("2026-10-08T09:00:00", 60, 18);
+		segment("2026-10-08T09:01:00", 60, 18);
+		segment("2026-10-08T14:00:00", 60, 0);
+		segment("2026-10-08T20:59:30", 60, 30);
+		save();
+
+		summary(null)
+				.andExpect(jsonPath("$.distribution.goodSeconds").value(174))
+				.andExpect(jsonPath("$.distribution.turtleSeconds").value(66))
+				.andExpect(jsonPath("$.distribution.goodRate").value(73))
+				.andExpect(jsonPath("$.distribution.turtleRate").value(27))
+				.andExpect(jsonPath("$.distribution.mildSeconds").value(nullValue()))
+				.andExpect(jsonPath("$.distribution.mildRate").value(nullValue()));
 	}
 
 	private ResultActions summary(String date) throws Exception {

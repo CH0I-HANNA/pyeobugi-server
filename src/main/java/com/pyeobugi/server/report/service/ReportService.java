@@ -15,6 +15,7 @@ import com.pyeobugi.server.common.time.KstTimeUtils;
 import com.pyeobugi.server.report.api.ReportSummaryResponse;
 import com.pyeobugi.server.report.api.ReportSummaryResponse.HourlyRate;
 import com.pyeobugi.server.report.api.ReportSummaryResponse.PeriodSummary;
+import com.pyeobugi.server.report.api.ReportSummaryResponse.TurtleNeckTimeline;
 import com.pyeobugi.server.report.repository.HourlyStats;
 import com.pyeobugi.server.report.repository.PeriodStats;
 import com.pyeobugi.server.report.repository.ReportQueryRepository;
@@ -32,7 +33,7 @@ public class ReportService {
 
 	/**
 	 * date(KST, YYYY-MM-DD)의 리포트. date가 null이면 오늘 (plan 7-3).
-	 * 세 쿼리가 같은 시점의 데이터를 보도록 읽기 전용 트랜잭션 하나에서 실행한다.
+	 * 모든 쿼리가 같은 시점의 데이터를 보도록 읽기 전용 트랜잭션 하나에서 실행한다.
 	 */
 	@Transactional(readOnly = true)
 	public ReportSummaryResponse summarize(String deviceId, String dateParam) {
@@ -43,21 +44,34 @@ public class ReportService {
 		// 미래 날짜는 400 대신 빈 응답 (14장 #20 제안: 클라이언트 시계가 조금 빠른 자정 직후 대비)
 		if (date.isAfter(now.toLocalDate())) {
 			return new ReportSummaryResponse(false, generatedAt, date.toString(),
-					PeriodSummary.EMPTY, PeriodSummary.EMPTY, emptyHourly(), null);
+					PeriodSummary.EMPTY, PeriodSummary.EMPTY, PeriodSummary.EMPTY, PeriodSummary.EMPTY,
+					emptyHourly(), TurtleNeckTimeline.EMPTY, null, null);
 		}
 
+		LocalDate weekStart = KstTimeUtils.weekStart(date);
 		PeriodStats dayStats = reportQueryRepository.findPeriodStats(deviceId, date, date);
-		PeriodStats weekStats = reportQueryRepository.findPeriodStats(deviceId, KstTimeUtils.weekStart(date), date);
 		PeriodSummary day = toSummary(dayStats);
+		List<LocalDateTime> turtleNeckTimes = reportQueryRepository.findTurtleNeckTimes(deviceId, date);
 
 		return new ReportSummaryResponse(
 				hasData(day),
 				generatedAt,
 				date.toString(),
 				day,
-				toSummary(weekStats),
+				period(deviceId, date.minusDays(1), date.minusDays(1)),
+				period(deviceId, weekStart, date),
+				// 지난주 같은 요일까지 (14장 #7 확정 전 제안값): 이번 주와 같은 길이로 비교
+				period(deviceId, weekStart.minusWeeks(1), date.minusWeeks(1)),
 				toHourly(reportQueryRepository.findHourlyStats(deviceId, date)),
+				new TurtleNeckTimeline(
+						turtleNeckTimes.stream().map(KstTimeUtils::formatDateTime).toList(),
+						PeakHours.of(turtleNeckTimes)),
+				DistributionCalculator.of(dayStats.getUsageSec(), dayStats.getBadSec()),
 				CommentPolicy.of(day.usageSeconds(), day.postureKeepRate()));
+	}
+
+	private PeriodSummary period(String deviceId, LocalDate from, LocalDate to) {
+		return toSummary(reportQueryRepository.findPeriodStats(deviceId, from, to));
 	}
 
 	private static LocalDate parseDate(String value) {

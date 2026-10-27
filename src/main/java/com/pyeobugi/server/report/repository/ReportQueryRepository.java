@@ -1,6 +1,7 @@
 package com.pyeobugi.server.report.repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.Query;
@@ -15,7 +16,7 @@ import com.pyeobugi.server.event.domain.EventEntity;
  */
 public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 
-	/** 기간 지표: day(from = to = date), week(from = 그 주 월요일, to = date) */
+	/** 기간 지표: day, yesterday, week, lastWeek에 기간만 바꿔 호출한다 */
 	@Query(value = """
 			SELECT
 			  CAST(COALESCE(SUM(duration_sec), 0)                AS SIGNED) AS usageSec,
@@ -43,6 +44,15 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 			ORDER BY kst_hour
 			""", nativeQuery = true)
 	List<HourlyStats> findHourlyStats(@Param("deviceId") String deviceId,
+			@Param("date") LocalDate date);
+
+	/** 거북목 감지 시각 (turtleNeckTimeline). 배치 안에서 순서가 섞여 오므로 정렬해서 돌려준다 (plan 8-4) */
+	@Query(value = """
+			SELECT occurred_at FROM events
+			WHERE device_id = :deviceId AND kst_date = :date AND type = 'POSTURE_BAD'
+			ORDER BY occurred_at
+			""", nativeQuery = true)
+	List<LocalDateTime> findTurtleNeckTimes(@Param("deviceId") String deviceId,
 			@Param("date") LocalDate date);
 
 }
