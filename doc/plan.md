@@ -2,10 +2,24 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 작성일 | 2026-10-26 |
+| 작성일 | 2026-10-26 (v3 갱신 2026-10-27) |
 | 담당 | 백엔드 |
-| 상태 | 초안 v2 (14장의 확인 사항 확정 후 갱신) |
-| 기준 문서 | 노션 API 명세(FE 초안), 기획서(서버·리포트), AI 파트 레포 `docs/handoff-backend.md` |
+| 상태 | 초안 v3 (14장의 확인 사항 확정 후 갱신) |
+| 기준 문서 | 노션 API 명세(FE 초안 + 26-10-27 수정사항), 기획서(서버·리포트), AI 파트 레포 `docs/handoff-backend.md` |
+
+**v3 변경 사항** (FE 26-10-27 수정사항 반영)
+
+| 항목 | v2 | v3 |
+| --- | --- | --- |
+| 리포트 조회 | 파라미터 없음, 항상 오늘 | **`?date=YYYY-MM-DD`** (선택, 생략 시 오늘). 형식 오류·없는 날짜는 `400 INVALID_REQUEST` |
+| 리포트 응답 | `today` | **`day`로 이름 변경** (요청한 날짜 하루치), 응답에 **`date` echo** 추가 |
+| `week` | 이번 주 월요일 ~ 현재 | **요청 날짜가 속한 주의 월요일 ~ 요청 날짜** |
+| `hourly` | 기록 있는 시간대만, `usageSeconds` 포함 | **항상 24개** (0~23시), `{ hour, postureKeepRate }`, 기록 없으면 `null` |
+| `hasData` | 전체 기간 기준 | **요청 날짜(`day`) 기준**. 별도 `EXISTS` 쿼리 없이 `day` 집계값으로 판정 |
+| 시각 형식 | 오프셋 포함 ISO 8601 | **`+09:00` 오프셋, 초 단위만 허용** (`Z`, 다른 오프셋, 밀리초는 `INVALID_PAYLOAD`) |
+| 거부 사유 우선순위 | 검사 순서대로 | **`FORBIDDEN_FIELD` 우선** |
+| 에러 body | `{ code, message, traceId }` | `{ code, message?, traceId?, retryAfter? }` (FE는 `code`만 필수) |
+| 기존 확장 필드 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 요청 날짜 기준으로 재정의, FE 수요 확인 전까지 보류 (14장 #19) |
 
 **v2 변경 사항**
 
@@ -69,7 +83,7 @@
 | 캘리브레이션 완료 | 로컬 + 서버 | `CALIBRATION_COMPLETED` 수신 (재설정 시 `isRecalibration: true`) |
 | 설정 슬라이더, 토글 | 로컬 | 토글 on/off만 `SETTINGS_CHANGED`로 수신 |
 | 자세 판정, 사용 시간, 뽀모도로 | 로컬 + 서버 | 이벤트 수신 후 집계 |
-| 메인 리포트 (오늘의 기록) | 서버 | `GET /api/reports/summary` |
+| 메인 리포트 (날짜별 기록) | 서버 | `GET /api/reports/summary?date=` |
 | 운영 지표 조회 | 서버(DB) | 읽기 전용 계정 + 운영 SQL 제공 |
 
 ### 2-2. 산출물
@@ -291,7 +305,9 @@ CREATE TABLE events (
 | Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone: Asia/Seoul` |
 
 - 코드에서는 `OffsetDateTime`으로 받아 `ZoneId.of("Asia/Seoul")`로 변환한 뒤 `LocalDateTime`으로 저장한다.
-- 요청의 시각은 오프셋(offset)이 포함된 ISO 8601만 허용한다. 오프셋이 없는 시각은 해석이 모호하므로 거절한다.
+- 요청의 시각은 **`YYYY-MM-DDTHH:mm:ss+09:00` 형식만** 허용한다. 오프셋이 없는 시각, `Z`·다른 오프셋, 밀리초가 붙은 시각은 `INVALID_PAYLOAD`로 거절한다. 정규식으로 형식을 먼저 확인한 뒤 `OffsetDateTime`으로 파싱한다 (Jackson 기본 파서는 `Z`와 밀리초를 받아들이므로 그대로 쓰지 않는다).
+- 응답의 시각(`generatedAt`, `turtleNeckTimeline.occurredAt`)도 같은 형식으로 내려준다.
+- 리포트의 `date` 쿼리는 `uuuu-MM-dd` + `ResolverStyle.STRICT`로 파싱해 `2026-02-30`, `2026-1-5` 같은 값을 거절한다.
 - KST는 서머타임이 없어서 날짜·시간 경계 계산이 단순하다.
 
 ### 6-4. JPA 설정과 엔티티 매핑
@@ -379,11 +395,14 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 { "code": "DEVICE_ID_INVALID", "message": "...", "traceId": "req-7f3a9c2e" }
 ```
 
+- 형식은 `{ code, message?, traceId?, retryAfter? }`. FE는 `code`만 필수로 보고 나머지는 없어도 동작한다.
+- 서버는 `code`, `message`, `traceId`를 항상 넣고, `retryAfter`는 429에서만 넣는다.
+
 | 상황 | HTTP | code | 클라이언트 처리 |
 | --- | --- | --- | --- |
 | 기기 ID 누락, UUID 형식 위반 | 400 | `DEVICE_ID_INVALID` | 버그로 보고 배치를 남긴 채 재시도 |
-| 요청 구조 오류 (배치 전체) | 400 | `INVALID_REQUEST` | 배치 폐기 |
-| 이벤트 100개 초과, 본문 64KB 초과 | 413 | `PAYLOAD_TOO_LARGE` | 배치를 반으로 나눠 재전송, 1개짜리면 폐기 |
+| 요청 구조 오류 (최상위 모르는 필드, `events` 빈 배열 등), 리포트 `date` 오류 | 400 | `INVALID_REQUEST` | 배치 폐기 |
+| 이벤트 101개 이상, 본문 64KB 초과 | 413 | `PAYLOAD_TOO_LARGE` | 배치를 반으로 나눠 재전송, 1개짜리면 폐기 |
 | 호출 한도 초과 | 429 | `RATE_LIMITED` | `retryAfter`초 후 재시도 |
 | 서버 오류 | 5xx | `INTERNAL_ERROR` | 큐 유지 후 재시도 |
 
@@ -427,6 +446,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 | `SETTINGS_CHANGED` | `studyTimer`, `stretch`, `awayPause`, `overlay` | `occurredAt` | 기능 on/off 비율 |
 
 - 이벤트 공통 필드: `eventId`, `type`, `sessionId`, `occurredAt`, `payload`
+- 최상위 body, 이벤트 공통 필드, 타입별 payload 모두 화이트리스트(strict)로 검사한다.
 - `severity` 허용 값은 AI 레포의 `src/shared/posture/score.ts`에서 확인한 뒤 확정한다.
 - `bubbleType` 허용 값: `POSTURE`, `STRETCH`, `TIMER_BREAK`, `ENCOURAGE`, `GREETING`
 
@@ -444,8 +464,8 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 | rejected code | 의미 |
 | --- | --- |
-| `INVALID_PAYLOAD` | payload 형식, 값 오류 |
-| `FORBIDDEN_FIELD` | 허용되지 않은 필드 포함 |
+| `INVALID_PAYLOAD` | 공통 필드·payload 형식, 값 오류 |
+| `FORBIDDEN_FIELD` | 허용되지 않은 필드 포함 (다른 오류와 같이 있어도 이 code 우선) |
 | `UNKNOWN_TYPE` | 정의되지 않은 `type` |
 | `OCCURRED_AT_OUT_OF_RANGE` | 시각 허용 범위 밖 |
 
@@ -459,73 +479,87 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 
 ### 7-3. `GET /api/reports/summary`
 
-FE 초안의 기본 응답(`hasData`, `today`, `week`, `comment`)에 리포트 확장 필드를 **추가만** 한다. 기존 필드는 바꾸지 않으므로 기존 클라이언트와 호환된다.
+FE 26-10-27 수정안(`hasData`, `generatedAt`, `date`, `day`, `week`, `hourly`, `comment`)을 **기본 응답**으로 한다. v2에서 제안했던 확장 필드(`yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`)는 요청 날짜 기준으로 정의만 바꿔 두고, FE 수요가 확인되면 **추가만** 한다 (14장 #19).
+
+**요청**
+
+```
+GET /api/reports/summary?date=2026-10-04
+X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
+```
+
+| 쿼리 | 규칙 |
+| --- | --- |
+| `date` | KST 날짜 `YYYY-MM-DD`, 선택. 생략하면 서버 기준 KST 오늘 |
+| 잘못된 `date` | 형식 오류(`2026-1-5`), 존재하지 않는 날짜(`2026-02-30`) → `400 INVALID_REQUEST` |
+| 미래 `date` | **(제안)** 400이 아니라 `200` + 빈 응답(`hasData: false`). 클라이언트 시계가 서버보다 앞선 자정 직후에 오늘 화면이 400으로 깨지지 않게 하기 위함 (14장 #20) |
 
 **응답 200**
 
 ```json
 {
   "hasData": true,
-  "generatedAt": "2026-10-09T20:00:00+09:00",
-  "today":     { "postureKeepRate": 78, "turtleNeckCount": 12, "pomodoroCount": 6,  "usageSeconds": 20400 },
-  "yesterday": { "postureKeepRate": 72, "turtleNeckCount": 15, "pomodoroCount": 5,  "usageSeconds": 19200 },
-  "week":      { "postureKeepRate": 76, "turtleNeckCount": 48, "pomodoroCount": 27, "usageSeconds": 81000 },
-  "lastWeek":  { "postureKeepRate": 74, "turtleNeckCount": 52, "pomodoroCount": 24, "usageSeconds": 78000 },
+  "generatedAt": "2026-10-04T14:05:00+09:00",
+  "date": "2026-10-04",
+  "day":  { "postureKeepRate": 82, "turtleNeckCount": 5,  "pomodoroCount": 6,  "usageSeconds": 12600 },
+  "week": { "postureKeepRate": 78, "turtleNeckCount": 31, "pomodoroCount": 22, "usageSeconds": 71400 },
   "hourly": [
-    { "hour": 10, "usageSeconds": 3600, "postureKeepRate": 92 },
-    { "hour": 14, "usageSeconds": 3300, "postureKeepRate": 62 }
+    { "hour": 0, "postureKeepRate": null },
+    { "hour": 9, "postureKeepRate": 70 },
+    { "hour": 23, "postureKeepRate": null }
   ],
-  "turtleNeckTimeline": {
-    "occurredAt": ["2026-10-09T10:47:12+09:00", "2026-10-09T14:05:40+09:00"],
-    "peakHours": [14, 19]
-  },
-  "distribution": {
-    "goodSeconds": 15900, "mildSeconds": null, "turtleSeconds": 4500,
-    "goodRate": 78,       "mildRate": null,    "turtleRate": 22
-  },
   "comment": { "message": "오늘 잘했어요", "mood": "GOOD" }
 }
 ```
 
-**응답 200 — 기록 없음 (첫 사용)**
+> `hourly`는 지면상 일부만 적었고, 실제로는 0~23시 24개가 모두 들어간다.
+
+**응답 200 — 요청 날짜에 기록 없음**
 
 ```json
 {
   "hasData": false,
   "generatedAt": "2026-10-09T20:00:00+09:00",
-  "today":     { "postureKeepRate": null, "turtleNeckCount": 0, "pomodoroCount": 0, "usageSeconds": 0 },
-  "yesterday": { "postureKeepRate": null, "turtleNeckCount": 0, "pomodoroCount": 0, "usageSeconds": 0 },
-  "week":      { "postureKeepRate": null, "turtleNeckCount": 0, "pomodoroCount": 0, "usageSeconds": 0 },
-  "lastWeek":  { "postureKeepRate": null, "turtleNeckCount": 0, "pomodoroCount": 0, "usageSeconds": 0 },
-  "hourly": [],
-  "turtleNeckTimeline": { "occurredAt": [], "peakHours": [] },
-  "distribution": null,
+  "date": "2026-10-09",
+  "day":  { "postureKeepRate": null, "turtleNeckCount": 0, "pomodoroCount": 0, "usageSeconds": 0 },
+  "week": { "postureKeepRate": 76, "turtleNeckCount": 20, "pomodoroCount": 9, "usageSeconds": 40200 },
+  "hourly": [ { "hour": 0, "postureKeepRate": null }, "... 24개 모두 null ..." ],
   "comment": null
 }
 ```
+
+- `hasData`가 `day` 기준이므로, 그날 기록이 없어도 **`week`에는 같은 주 다른 날의 값이 들어갈 수 있다.** 빈 상태 화면에서 `week` 카드를 보여줄지는 FE가 정한다.
 
 **필드 정의**
 
 | 필드 | 정의 |
 | --- | --- |
-| `hasData` | `duration_sec > 0`인 `USAGE_SEGMENT`, `POSTURE_BAD`, `POMODORO_COMPLETED` 중 하나라도 저장되어 있으면 `true` |
-| `today` | KST 오늘 00:00 ~ 현재 |
-| `yesterday` | KST 어제 하루 전체 |
-| `week` | 이번 주 월요일 00:00(KST) ~ 현재 (mock 동작과 동일) |
-| `lastWeek` | 지난주 비교 기간 (전체 vs 같은 요일까지, 14장에서 확정) |
+| `hasData` | **요청 날짜**에 `duration_sec > 0`인 `USAGE_SEGMENT`, `POSTURE_BAD`, `POMODORO_COMPLETED` 중 하나라도 있으면 `true`. `day` 집계값으로 판정 (`usageSeconds > 0 \|\| turtleNeckCount > 0 \|\| pomodoroCount > 0`) |
+| `generatedAt` | 서버 응답 생성 시각 (`+09:00`, 초 단위) |
+| `date` | 요청한 날짜 echo. `date`를 생략했으면 서버가 사용한 오늘 날짜 |
+| `day` | 요청 날짜 하루치 (KST 00:00 ~ 24:00, 오늘이면 결과적으로 현재까지) |
+| `week` | 요청 날짜가 속한 주의 **월요일 00:00(KST) ~ 요청 날짜 24:00**. 오늘이면 기존(월요일 ~ 현재)과 같음 |
 | `postureKeepRate` | `(Σduration − Σbad) ÷ Σduration × 100`, **마지막에 한 번만 반올림**. 사용 시간이 0이면 `null` |
 | `turtleNeckCount` | `POSTURE_BAD` 개수 (고개 숙임 포함, AI ADR 0002) |
 | `pomodoroCount` | `POMODORO_COMPLETED` 개수 |
 | `usageSeconds` | Σ`duration_sec` |
-| `hourly` | 오늘 사용 기록이 있는 시간대만, 시간순. 표시 범위와 색 구분은 FE 담당 |
-| `turtleNeckTimeline.occurredAt` | 오늘 `POSTURE_BAD`의 발생 시각, 시간순 정렬 |
-| `turtleNeckTimeline.peakHours` | 시간대별 개수 상위 구간 (기준은 14장에서 확정) |
-| `distribution` | 오늘 자세 분포. 데모는 2단계라 `mild*`는 `null`. 오늘 사용 시간이 0이면 `null` |
-| `comment` | 서버가 판정한 문구와 `mood`. 오늘 사용 시간이 0이면 `null` |
+| `hourly` | 요청 날짜의 시간대별 유지율. **항상 24개**, `hour` 0~23 오름차순. 해당 시간대 Σ`duration_sec`이 0이면 `postureKeepRate: null`. 산식은 `postureKeepRate`와 같음. 시간대는 `kst_hour`(= `startedAt`의 시) 기준 (8-4) |
+| `comment` | 서버가 판정한 문구와 `mood`. `day` 사용 시간이 0이면 `null` |
 
-- "어제 대비", "지난주 대비" 차이(diff)는 **FE가 계산**한다. 유지율 %p 차이는 반올림된 값끼리 뺀다.
+- 차트 색 구간(70 미만 / 70~80 / 80 초과)은 FE가 정한다.
+- "어제 대비", "지난주 대비" 차이(diff)는 **FE가 계산**한다. 유지율 %p 차이는 반올림된 값끼리 뺀다. 어제 값은 `date` 파라미터로 한 번 더 조회해서 얻을 수 있다.
 - `Cache-Control: no-store`
 - 서버 처리 시간 목표 1초 이내
+
+**확장 필드 (보류, 14장 #19)**
+
+| 필드 | 정의 (요청 날짜 `D` 기준) |
+| --- | --- |
+| `yesterday` | `D − 1일` 하루 |
+| `lastWeek` | `D`가 속한 주의 지난주 (전체 vs 같은 요일까지, 14장 #7) |
+| `turtleNeckTimeline.occurredAt` | `D`의 `POSTURE_BAD` 발생 시각, 시간순 |
+| `turtleNeckTimeline.peakHours` | 시간대별 개수 상위 구간 (14장 #9) |
+| `distribution` | `D`의 자세 분포 (8-6). `D` 사용 시간이 0이면 `null` |
 
 ---
 
@@ -557,16 +591,20 @@ FE 초안의 기본 응답(`hasData`, `today`, `week`, `comment`)에 리포트 �
 
 **2단계: 이벤트별 검증** (`events`는 `JsonNode`로 받아 하나씩 직접 검사)
 
+FE 수정안에 따라 **금지 필드가 다른 오류와 같이 있으면 `FORBIDDEN_FIELD`가 우선**이다. 그래서 금지 필드 검사(1, 3)를 값 검사(4, 5)보다 앞에 둔다.
+
 | 순서 | 검사 | 실패 code |
 | --- | --- | --- |
 | 1 | 이벤트가 객체인지, 공통 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` |
-| 2 | `eventId`, `sessionId`가 UUID v4인지, `occurredAt`이 오프셋 포함 ISO 8601인지 | `INVALID_PAYLOAD` |
-| 3 | `type`이 정의된 값인지 | `UNKNOWN_TYPE` |
-| 4 | payload에 타입별 허용 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` |
-| 5 | payload 값의 형식과 범위 | `INVALID_PAYLOAD` |
-| 6 | `occurredAt`이 현재 +5분 ~ 과거 30일 범위인지 | `OCCURRED_AT_OUT_OF_RANGE` |
+| 2 | `type`이 정의된 값인지 (타입을 알아야 payload 화이트리스트를 정할 수 있음) | `UNKNOWN_TYPE` |
+| 3 | payload에 타입별 허용 필드 외 필드가 없는지 | `FORBIDDEN_FIELD` |
+| 4 | `eventId`, `sessionId`가 UUID v4인지, `occurredAt`이 `+09:00`·초 단위 형식인지, payload 값의 형식과 범위 | `INVALID_PAYLOAD` |
+| 5 | `occurredAt`(`USAGE_SEGMENT`는 `startedAt`·`endedAt`도)이 현재 +5분 ~ 과거 30일 범위인지 | `OCCURRED_AT_OUT_OF_RANGE` |
 
-> 검사 순서와 `eventId` 형식 오류 시의 code는 **AI 레포 `src/main/mock/validate.ts`의 동작에 맞춘다.** 위 표는 초안이며, 옮기면서 다른 점이 있으면 mock 쪽을 따른다.
+- 이벤트가 객체가 아니면 `INVALID_PAYLOAD`, `type`이 없거나 문자열이 아니면 `UNKNOWN_TYPE`으로 둔다.
+- 타입을 모르면 payload 화이트리스트를 정할 수 없으므로, `type`이 틀린 이벤트의 payload 금지 필드는 `UNKNOWN_TYPE`으로 응답된다.
+
+> `FORBIDDEN_FIELD` 외의 순서와 `eventId` 형식 오류 시의 code는 **AI 레포 `src/main/mock/validate.ts`의 동작에 맞춘다.** 위 표는 초안이며, 옮기면서 다른 점이 있으면 mock 쪽을 따른다.
 
 **`USAGE_SEGMENT` 추가 규칙** (위반 시 `INVALID_PAYLOAD`)
 
@@ -661,7 +699,9 @@ public class EventService {
 | `USAGE_SEGMENT` | `startedAt`의 KST 날짜 | `startedAt`의 KST 시 |
 | 그 외 | `occurredAt`의 KST 날짜 | `occurredAt`의 KST 시 |
 
-현재 클라이언트는 `USAGE_SEGMENT`를 1분마다 만들고 날짜 경계에서만 끊는다. 시간 경계를 넘는 구간은 `startedAt` 시간대로 들어가므로, **시간대마다 최대 1분 정도의 오차**가 생길 수 있다. 데모에는 큰 문제가 없지만, 정확도를 위해 **매 정시 분할**을 AI 파트에 요청한다 (14장).
+현재 클라이언트는 `USAGE_SEGMENT`를 1분마다 만들고 날짜 경계에서만 끊는다. 시간 경계를 넘는 구간(예: `09:59:30 ~ 10:00:30`)은 **나누지 않고 전부 `startedAt` 시간대(9시)로 집계**한다 (FE와 합의). 그래서 **시간대마다 최대 1분 정도의 오차**가 생길 수 있다. 데모에는 큰 문제가 없지만, 정확도를 위해 **매 정시 분할**을 AI 파트에 요청한다 (14장 #5). 클라이언트가 정시 분할을 해도 서버 집계 코드는 바뀌지 않는다.
+
+`hourly`를 이 기준으로 만들기 때문에, 시간대별 Σ`duration_sec`을 모두 더하면 항상 `day.usageSeconds`와 같다 (구간이 두 시간대에 나뉘어 들어가지 않음).
 
 `POSTURE_BAD`의 `occurredAt`은 판정 시각이 아니라 나쁜 자세가 **시작된** 시각으로 되돌려 기록되므로, 배치 안에서 시각 순서가 뒤섞일 수 있다. 서버는 배치 내 순서를 가정하지 않는다.
 
@@ -693,7 +733,7 @@ public interface HourlyStats {
 ```java
 public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 
-    /** 기간 지표: today, yesterday, week, lastWeek에 기간만 바꿔 호출 */
+    /** 기간 지표: day(from = to = date), week(from = 그 주 월요일, to = date)에 기간만 바꿔 호출 */
     @Query(value = """
         SELECT
           CAST(COALESCE(SUM(duration_sec), 0)      AS SIGNED) AS usageSec,
@@ -711,47 +751,39 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
                                 @Param("from") LocalDate from,
                                 @Param("to") LocalDate to);
 
-    /** 시간대별 유지율 */
+    /** 시간대별 유지율: 기록 있는 시간대만 반환, 24칸 채우기는 Java에서 */
     @Query(value = """
         SELECT kst_hour                              AS kstHour,
                CAST(SUM(duration_sec) AS SIGNED)     AS usageSec,
                CAST(SUM(bad_duration_sec) AS SIGNED) AS badSec
         FROM events
-        WHERE device_id = :deviceId AND kst_date = :today
+        WHERE device_id = :deviceId AND kst_date = :date
           AND type = 'USAGE_SEGMENT' AND duration_sec > 0
         GROUP BY kst_hour
         ORDER BY kst_hour
         """, nativeQuery = true)
     List<HourlyStats> findHourlyStats(@Param("deviceId") String deviceId,
-                                      @Param("today") LocalDate today);
+                                      @Param("date") LocalDate date);
 
-    /** 거북목 감지 시점 */
+    /** 거북목 감지 시점 (확장 필드 turtleNeckTimeline용) */
     @Query(value = """
         SELECT occurred_at FROM events
-        WHERE device_id = :deviceId AND kst_date = :today AND type = 'POSTURE_BAD'
+        WHERE device_id = :deviceId AND kst_date = :date AND type = 'POSTURE_BAD'
         ORDER BY occurred_at
         """, nativeQuery = true)
     List<LocalDateTime> findTurtleNeckTimes(@Param("deviceId") String deviceId,
-                                            @Param("today") LocalDate today);
-
-    /** hasData: 결과가 0보다 크면 true */
-    @Query(value = """
-        SELECT EXISTS (
-          SELECT 1 FROM events
-          WHERE device_id = :deviceId
-            AND ((type = 'USAGE_SEGMENT' AND duration_sec > 0)
-                 OR type IN ('POSTURE_BAD', 'POMODORO_COMPLETED'))
-        )
-        """, nativeQuery = true)
-    long existsData(@Param("deviceId") String deviceId);
+                                            @Param("date") LocalDate date);
 }
 ```
 
 - MySQL의 `SUM()`은 결과를 `DECIMAL`로 돌려주므로, 프로젝션의 `Long` getter와 타입이 어긋나지 않도록 SQL에서 `CAST(... AS SIGNED)`로 정수 변환한다.
-- `EXISTS`도 같은 이유로 `long`으로 받고 `> 0`으로 판정한다.
+- `hasData`는 요청 날짜 기준이라 별도 쿼리 없이 `day`의 `PeriodStats`로 판정한다 (`usageSec > 0 || turtleCount > 0 || pomodoroCount > 0`). `USAGE_SEGMENT`의 `duration_sec`이 0이면 `usageSec`에 더해지지 않으므로 기존 `duration_sec > 0` 조건과 같다.
+- 요청 한 번에 쿼리는 `day`, `week`, `hourly` 3번이다.
 
 계산 로직(Java)
 
+- 기간: `day` = `date ~ date`, `week` = `date.with(DayOfWeek.MONDAY) ~ date`. 미래 날짜면 쿼리 없이 빈 응답 (7-3)
+- `hourly`: 길이 24 배열을 `null`로 채운 뒤 쿼리 결과의 `kstHour` 칸만 유지율로 채운다
 - 유지율: `Math.round((usage − bad) * 100.0 / usage)`, `usage == 0`이면 `null`
 - 주간 유지율은 일별 유지율의 평균이 아니라 **주간 합계**로 계산
 - `peakHours`: 거북목 시점 목록을 시간대별로 세어 상위 구간 추출
@@ -772,12 +804,14 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 
 **코멘트 판정** (mock 동작과 동일하게 시작, 값은 설정 파일로 분리)
 
-| 오늘 유지율 | mood | 문구 (예시) |
+| `day` 유지율 | mood | 문구 (예시) |
 | --- | --- | --- |
 | 80% 이상 | `GOOD` | 오늘 잘했어요 |
 | 50% 이상 | `NORMAL` | (기획 확정 필요) |
 | 50% 미만 | `BAD` | (기획 확정 필요) |
-| 오늘 사용 시간 0 | — | `comment: null` |
+| `day` 사용 시간 0 | — | `comment: null` |
+
+- 과거 날짜를 조회해도 문구가 "오늘 ..."로 나가지 않도록 문구 확정 시 같이 정한다 (14장 #8).
 
 ### 8-7. Rate Limit과 IP 해시
 
@@ -867,7 +901,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | `post-events.request.json` / `.response.json` | 세션 전체(시작, 기준 잡기, 나쁜 자세, 자정에서 나뉜 구간 4개, 종료) 저장 |
 | `post-events-mixed.*` | 중복 1, 정상 1, 금지 필드(`payload.pitch`) 1 → `accepted 1 / duplicated 1 / rejected 1` |
 | `reports-summary.response.json` | 위 이벤트 저장 후 리포트 |
-| `reports-summary-empty.response.json` | 새 기기 → `hasData: false` |
+| `reports-summary-empty.response.json` | 새 기기 → `hasData: false`, `hourly` 24개 모두 `null` |
 | `error-device-id.response.json` | 잘못된 기기 ID → 400 `DEVICE_ID_INVALID` |
 
 - 시각이 들어간 예시는 테스트 시계(`Clock`)를 고정해서 비교한다. 서버는 `KstClock`을 주입받아 현재 시각을 얻도록 만든다.
@@ -889,11 +923,24 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - [ ] 최상위에 `events` 외 필드 → 400
 - [ ] payload에 `pitch` 포함 → `FORBIDDEN_FIELD`
 - [ ] 오프셋 없는 시각 → 거절
+- [ ] `Z`, `+00:00` 등 `+09:00` 외 오프셋 → `INVALID_PAYLOAD`
+- [ ] 밀리초 포함 시각 (`...:00.000+09:00`) → `INVALID_PAYLOAD`
+- [ ] 금지 필드 + 다른 오류(예: `durationSec` 불일치) 동시 → `FORBIDDEN_FIELD`
+- [ ] `events` 빈 배열 → 400 `INVALID_REQUEST`
 - [ ] 유지율 반올림 (예: 78.5 → 79), 사용 시간 0 → `null`
 - [ ] 주간 유지율이 일별 평균이 아니라 합계 기준인지
 - [ ] 자세 분포 비율 합 100
 - [ ] 월요일 00:00 주간 경계
 - [ ] Rate Limit 초과 시 429 + 본문 `retryAfter` + `Retry-After` 헤더
+- [ ] `date` 생략 → 오늘, 응답 `date`에 오늘 날짜
+- [ ] `date=2026-02-30`, `date=2026-1-5`, `date=abc` → 400 `INVALID_REQUEST`
+- [ ] 미래 `date` → 200 + `hasData: false`
+- [ ] 과거 날짜(수요일) 조회 시 `week` = 그 주 월요일 ~ 수요일, 목요일 이후 기록 미포함
+- [ ] 일요일 조회 시 `week`에 그 주 월~일 포함, 다음 날(월요일) 조회 시 새 주
+- [ ] `hourly` 항상 24개, 기록 없는 시간 `null`
+- [ ] `09:59:30 ~ 10:00:30` 구간 → 9시로 집계
+- [ ] 요청 날짜에 기록 없고 같은 주 다른 날에 기록 있음 → `hasData: false`, `week`는 값 있음
+- [ ] `POSTURE_BAD`만 있는 날 → `hasData: true`, `day.postureKeepRate: null`
 
 ---
 
@@ -1001,8 +1048,8 @@ ORDER BY kst_hour;
 | **0. 준비·합의** | 14장 확인 사항 회신, AI 레포의 `validate.ts`·`summary.ts`·`*.test.ts`·`score.ts` 분석, 옮길 규칙 목록 작성 | 핵심 확인 사항(1~4번) 확정 |
 | **1. 뼈대** | 4-3 설정으로 프로젝트 생성, 프로필 분리, JPA·시간대 설정(6-3, 6-4), Flyway V1 스키마, `EventEntity`, 에러 포맷, `TraceIdFilter`, `DeviceIdFilter`, springdoc 설정 | 서버가 MySQL에 연결되어 실행되고, 잘못된 헤더 요청 시 400 `DEVICE_ID_INVALID` + traceId 응답 |
 | **2. 수집 API** | 최상위 구조 검증, 이벤트별 검증기, `EventRepository.insertIgnore` + `EventService`, `BodySizeFilter` | 중복 재전송 시 `duplicated`로 집계, 금지 필드 `rejected` |
-| **3. 조회 API (기본)** | `today`, `week`, `hasData`, `comment` | FE 초안의 기본 응답과 일치 |
-| **4. 조회 API (확장)** | `yesterday`, `lastWeek`, `hourly`, `turtleNeckTimeline`, `distribution` | 시간대 집계, 분포 비율 합 100 테스트 통과 |
+| **3. 조회 API (기본)** | `date` 파라미터, `day`, `week`, `hourly`(24개), `hasData`, `comment` | FE 26-10-27 수정안의 응답과 일치 |
+| **4. 조회 API (확장, FE 수요 확인 후)** | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 분포 비율 합 100 테스트 통과 |
 | **5. 보호 기능** | `RateLimitFilter`, IP HMAC 해시, 로그 마스킹, CORS | 한도 초과 시 429 + `retryAfter` |
 | **6. 테스트 정리** | 계약 테스트, 10-3 경계 사례 체크리스트 전부 통과 | 예시 JSON 전부 일치 |
 | **7. 로컬 연동** | 9-3 절차로 실제 클라이언트와 연결 | 앱 리포트 수치와 DB 집계 일치 |
@@ -1033,7 +1080,10 @@ ORDER BY kst_hour;
 | 15 | 엔드포인트 이름 | 기획서 `GET /report` → `GET /api/reports/summary`로 통일 | 기획 | 문서 정합성 |
 | 16 | 데이터 보관 기간 | 기간 제안 후 확정 | 기획 | 삭제 배치 |
 | 17 | 배포 환경 | 클라우드, 도메인, 인증서 | 팀 | 배포 |
-| 18 | `hasData` 범위 | 전체 기간 기준 (지난주 기록만 있어도 `true`) | FE | 빈 상태 화면 |
+| 18 | ~~`hasData` 범위~~ | **확정 (10-27)**: 요청 날짜(`day`) 기준 | FE | 빈 상태 화면 |
+| 19 | 확장 필드 필요 여부 | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution`이 아직 필요한지. 어제는 `date`로 재조회 가능, `lastWeek`는 주 단위 비교가 필요하면 추가 | FE | 7-3 확장 필드 |
+| 20 | 미래 `date` 처리 | 제안: `200` + 빈 응답(`hasData: false`). 400이 필요하면 변경 | FE | 7-3 |
+| 21 | 시 경계 구간 집계 | **확정 (10-27)**: `startedAt`의 시로 집계 (분할하지 않음) | FE | `hourly` |
 
 **백엔드가 회신할 항목** (AI 레포 인수인계 문서 기준)
 
@@ -1041,7 +1091,7 @@ ORDER BY kst_hour;
 | --- | --- |
 | Rate Limit 수치 | 8-7 제안값 |
 | IP 해시 방식 | HMAC-SHA256 + 서버 비밀키, 저장하지 않음 |
-| 이번 주 정의 | 월요일 00:00(KST) ~ 현재 (mock과 동일) |
+| 이번 주 정의 | 요청 날짜가 속한 주의 월요일 00:00(KST) ~ 요청 날짜 (오늘이면 mock과 동일) |
 | 코멘트 mood 규칙 | mock과 동일 (80/50), 문구는 기획 확정 후 반영 |
 | traceId 형식 | `req-` + 랜덤 8자리 16진수 |
 | OpenAPI 문서 | 서버 코드에서 springdoc으로 자동 생성 |
