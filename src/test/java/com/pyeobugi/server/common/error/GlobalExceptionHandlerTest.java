@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -19,8 +21,18 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@WebMvcTest(controllers = GlobalExceptionHandlerTest.TestController.class)
-@Import({GlobalExceptionHandlerTest.TestController.class, ErrorResponseWriter.class})
+import com.pyeobugi.server.common.filter.BodySizeFilter;
+import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.RateLimitFilter;
+
+/**
+ * 에러 처리와 traceId만 확인한다. 기기 ID·Rate Limit·본문 크기 필터는 각자의 테스트에서 확인하므로 슬라이스에서 뺀다.
+ */
+@WebMvcTest(
+		controllers = GlobalExceptionHandlerTest.TestController.class,
+		excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+				classes = {DeviceIdFilter.class, RateLimitFilter.class, BodySizeFilter.class}))
+@Import(GlobalExceptionHandlerTest.TestController.class)
 class GlobalExceptionHandlerTest {
 
 	@Autowired

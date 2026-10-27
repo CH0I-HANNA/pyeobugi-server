@@ -14,6 +14,17 @@ spring:
   flyway:
     enabled: true
 
+pyeobugi:
+  rate-limit:
+    # 평상시 10초 주기라 분당 6회 정도. 오프라인 후 일괄 동기화(큐 5,000개 ÷ 100개 = 최대 50회 연속)를 수용
+    device:
+      capacity: 60
+      refill-per-minute: 120
+    ip:
+      capacity: 1200
+      refill-per-minute: 1200
+    bucket-idle: 10m
+
 logging:
   pattern:
     # TraceIdFilter가 MDC에 넣은 traceId를 모든 로그에 붙인다. 요청 밖의 로그(서버 시작 등)는 빈 괄호 없이 출력
