@@ -232,7 +232,7 @@ pyeobugi-server/
     │   │   │   ├── filter/        # TraceIdFilter, DeviceIdFilter, RateLimitFilter, BodySizeFilter
     │   │   │   ├── error/         # ErrorCode, ErrorResponse, ApiException, GlobalExceptionHandler
     │   │   │   └── time/          # KstClock, KstTimeUtils (KST 변환, 날짜/시간대 계산)
-    │   │   ├── config/            # CorsConfig, JacksonConfig, OpenApiConfig, RateLimitProperties
+    │   │   ├── config/            # TimeConfig(Clock 빈), CorsConfig, JacksonConfig, OpenApiConfig, RateLimitProperties
     │   │   ├── event/
     │   │   │   ├── api/           # EventController, PostEventsResponse, RejectedEvent
     │   │   │   ├── validation/    # EventValidator, 타입별 PayloadValidator
