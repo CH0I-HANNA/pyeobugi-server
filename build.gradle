@@ -44,4 +44,6 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// @SpringBootTest는 main()을 거치지 않으므로 테스트 JVM에도 시간대를 따로 지정
+	systemProperty 'user.timezone', 'Asia/Seoul'
 }

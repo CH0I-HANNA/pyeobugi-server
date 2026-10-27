@@ -301,6 +301,7 @@ CREATE TABLE events (
 | 위치 | 설정 |
 | --- | --- |
 | JVM | 메인 클래스에서 `TimeZone.setDefault(TimeZone.getTimeZone("Asia/Seoul"))` |
+| 테스트 JVM | `build.gradle`의 `test` 태스크에 `systemProperty 'user.timezone', 'Asia/Seoul'` (`@SpringBootTest`는 `main()`을 거치지 않음) |
 | DB 연결 | JDBC URL에 `connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true` |
 | Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone: Asia/Seoul` |
 
