@@ -692,33 +692,20 @@ public interface EventRepository extends JpaRepository<EventEntity, Long> {
 }
 ```
 
-**서비스**
+**서비스** (`EventService.ingest`)
 
 ```java
-@Service
-@RequiredArgsConstructor
-public class EventService {
-
-    private final EventRepository eventRepository;
-    private final KstClock clock;
-
-    @Transactional
-    public SaveResult save(String deviceId, List<ValidatedEvent> events) {
-        LocalDateTime receivedAt = clock.now();
-        int accepted = 0;
-        for (ValidatedEvent e : events) {
-            accepted += eventRepository.insertIgnore(
-                deviceId, e.eventId(), e.sessionId(), e.type().name(),
-                e.occurredAt(), e.kstDate(), e.kstHour(),
-                e.durationSec(), e.badDurationSec(), e.mildDurationSec(),
-                e.payloadJson(), receivedAt);
-        }
-        return new SaveResult(accepted, events.size() - accepted);
-    }
+@Transactional
+public PostEventsResponse ingest(String deviceId, List<JsonNode> events) {
+    LocalDateTime now = clock.now();
+    // 이벤트마다: 검증 → Rejected면 rejected에 추가, Valid면 insertIgnore 반환값 1/0으로 accepted/duplicated
+    ...
+    return new PostEventsResponse(accepted, duplicated, rejected);
 }
 ```
 
-- `accepted` = 반환값 1의 합, `duplicated` = 검증 통과 수 − `accepted`
+- 검증과 저장을 같은 메서드에서 이벤트 순서대로 처리한다. 컨트롤러는 최상위 구조만 검사해서 `events` 배열을 넘긴다.
+- `accepted` = 반환값 1의 합, `duplicated` = 반환값 0의 합
 - 같은 배치 안의 중복 `eventId`도 두 번째 삽입이 0을 반환하므로 자연스럽게 `duplicated`가 된다.
 - `@Modifying` 쿼리는 트랜잭션 안에서만 실행되므로 서비스의 `@Transactional`이 필수다. 메서드가 끝나며 커밋된 뒤 컨트롤러가 응답하므로 "`accepted`는 커밋 완료된 수" 규칙이 지켜진다.
 - 배치당 최대 100번 실행되지만 하나의 트랜잭션 안이라 이 규모에서는 문제없다.
@@ -944,28 +931,31 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | `error-device-id.response.json` | 잘못된 기기 ID → 400 `DEVICE_ID_INVALID` |
 
 - 시각이 들어간 예시는 테스트 시계(`Clock`)를 고정해서 비교한다. 서버는 `KstClock`을 주입받아 현재 시각을 얻도록 만든다.
+- 계약 테스트(`EventsContractTest`)의 시계는 예시 리포트의 `generatedAt`과 같은 `2026-10-25T21:35:00+09:00`으로 고정한다.
+- `error-device-id`는 상태 코드와 `code`만 비교한다. mock의 `message`는 영어, 서버는 한국어라서다.
+- `reports-summary*.response.json`은 FE 10-27 수정안 이전 형식(`today`, `hasData` 전체 기간)이다. 3단계에서 mock이 갱신된 예시로 바꾸거나 차이를 정리한다 (14장 #22).
 - `traceId`, `generatedAt`처럼 매번 달라지는 값은 비교에서 제외한다.
 
 ### 10-3. 경계 사례 체크리스트
 
-- [ ] 같은 배치 재전송 → 전부 `duplicated`
-- [ ] 같은 `eventId`, 다른 내용 → `duplicated`, 기존 데이터 유지
-- [ ] 같은 배치 안의 중복 `eventId`
-- [ ] `accepted + duplicated + rejected = 요청 수`
-- [ ] 자정 종료 구간 (`23:59:00 ~ 다음 날 00:00:00`) 허용
-- [ ] 자정을 넘는 구간 거절
-- [ ] `durationSec` ±1초 허용, ±2초 거절
-- [ ] `occurredAt` 현재 +5분 허용, +5분 1초 거절
-- [ ] `occurredAt` 과거 30일 허용, 30일 초과 거절
-- [ ] 이벤트 100개 허용, 101개 413
-- [ ] 본문 64KB 경계
-- [ ] 최상위에 `events` 외 필드 → 400
-- [ ] payload에 `pitch` 포함 → `FORBIDDEN_FIELD`
-- [ ] 오프셋 없는 시각 → 거절
-- [ ] `Z`, `+00:00` 등 `+09:00` 외 오프셋 → `INVALID_PAYLOAD`
-- [ ] 밀리초 포함 시각 (`...:00.000+09:00`) → `INVALID_PAYLOAD`
-- [ ] 금지 필드 + 다른 오류(예: `durationSec` 불일치) 동시 → `FORBIDDEN_FIELD`
-- [ ] `events` 빈 배열 → 400 `INVALID_REQUEST`
+- [x] 같은 배치 재전송 → 전부 `duplicated`
+- [x] 같은 `eventId`, 다른 내용 → `duplicated`, 기존 데이터 유지
+- [x] 같은 배치 안의 중복 `eventId`
+- [x] `accepted + duplicated + rejected = 요청 수`
+- [x] 자정 종료 구간 (`23:59:00 ~ 다음 날 00:00:00`) 허용
+- [x] 자정을 넘는 구간 거절
+- [x] `durationSec` ±1초 허용, ±2초 거절
+- [x] `occurredAt` 현재 +5분 허용, +5분 1초 거절
+- [x] `occurredAt` 과거 30일 허용, 30일 초과 거절
+- [x] 이벤트 100개 허용, 101개 413
+- [x] 본문 64KB 경계
+- [x] 최상위에 `events` 외 필드 → 400
+- [x] payload에 `pitch` 포함 → `FORBIDDEN_FIELD`
+- [x] 오프셋 없는 시각 → 거절
+- [x] `Z`, `+00:00` 등 `+09:00` 외 오프셋 → `INVALID_PAYLOAD`
+- [x] 밀리초 포함 시각 (`...:00.000+09:00`) → `INVALID_PAYLOAD`
+- [x] 금지 필드 + 다른 오류(예: `durationSec` 불일치) 동시 → `FORBIDDEN_FIELD`
+- [x] `events` 빈 배열 → 400 `INVALID_REQUEST`
 - [ ] 유지율 반올림 (예: 78.5 → 79), 사용 시간 0 → `null`
 - [ ] 주간 유지율이 일별 평균이 아니라 합계 기준인지
 - [ ] 자세 분포 비율 합 100
