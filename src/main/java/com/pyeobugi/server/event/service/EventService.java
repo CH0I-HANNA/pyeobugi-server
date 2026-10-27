@@ -17,8 +17,10 @@ import com.pyeobugi.server.event.validation.EventValidator;
 import com.pyeobugi.server.event.validation.ValidationResult;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class EventService {
@@ -51,6 +53,8 @@ public class EventService {
 				}
 			}
 		}
+		log.info("events count={} accepted={} duplicated={} rejected={}",
+				events.size(), accepted, duplicated, rejected.size());
 		return new PostEventsResponse(accepted, duplicated, rejected);
 	}
 

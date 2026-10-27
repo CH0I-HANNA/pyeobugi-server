@@ -229,7 +229,8 @@ pyeobugi-server/
     │   ├── java/com/pyeobugi/server/
     │   │   ├── PyeobugiServerApplication.java
     │   │   ├── common/
-    │   │   │   ├── filter/        # TraceIdFilter, DeviceIdFilter, RateLimitFilter, BodySizeFilter
+    │   │   │   ├── filter/        # TraceIdFilter, AccessLogFilter, DeviceIdFilter, RateLimitFilter, BodySizeFilter
+    │   │   │   ├── security/      # IpHasher (HMAC-SHA256)
     │   │   │   ├── error/         # ErrorCode, ErrorResponse, ApiException, GlobalExceptionHandler, ErrorResponseWriter(필터용)
     │   │   │   └── time/          # KstClock, KstTimeUtils (KST 변환, 날짜/시간대 계산)
     │   │   ├── config/            # TimeConfig(Clock 빈), CorsConfig, JacksonConfig, OpenApiConfig, RateLimitProperties
@@ -585,6 +586,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 요청
  │
  ├─ ① TraceIdFilter       traceId 생성, MDC에 등록 (모든 로그에 traceId 포함)
+ ├─ (AccessLogFilter)     /api/** 요청 한 줄 로그 (이후 필터가 거절한 요청도 남도록 바깥쪽)
  ├─ ② DeviceIdFilter      X-Device-Id 존재·UUID v4 형식 검사 → 실패 시 400 DEVICE_ID_INVALID
  ├─ ③ RateLimitFilter     기기 ID 버킷 + IP 해시 버킷 검사 → 실패 시 429 RATE_LIMITED
  ├─ ④ BodySizeFilter      본문 64KB 초과 시 파싱 전에 413 PAYLOAD_TOO_LARGE
@@ -844,14 +846,25 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | 기기 ID | 분당 120회 (순간 최대 60회) | 평상시 10초 주기라 분당 6회 정도. 오프라인 후 일괄 동기화(큐 5,000개 ÷ 100개 = 최대 50회 연속)를 수용 |
 | IP 해시 | 분당 1,200회 | 학교 Wi-Fi처럼 여러 기기가 같은 IP를 쓰는 경우를 고려 |
 
-- 제안값은 `application.yml`로 분리해 운영 중에 조정할 수 있게 한다.
+- 제안값은 `application.yml`(`pyeobugi.rate-limit`)로 분리해 운영 중에 조정할 수 있게 한다.
+- 구현: Bucket4j 토큰 버킷(`capacity` = 순간 최대, `refill-per-minute` = 분당 보충) + Caffeine 캐시(10분 미사용 버킷 삭제, 최대 10만 개).
+- IP 버킷을 먼저, 기기 버킷을 다음에 검사한다. 기기 한도에 걸린 요청도 IP 토큰은 쓴다.
+- `retryAfter`는 다음 토큰까지 남은 시간을 초 단위로 올림한 값(최소 1)이고, 본문과 `Retry-After` 헤더에 같은 값을 넣는다.
+- 비밀키는 `pyeobugi.ip-hash.secret`(운영은 `IP_HASH_SECRET`, 32자 이상). 없거나 짧으면 서버가 시작되지 않는다.
 - IP 해시: **HMAC-SHA256 + 서버 비밀키**. IPv4는 약 43억 개뿐이라 단순 SHA-256은 전수 대입으로 원본 복원이 가능하다.
 - 리버스 프록시(reverse proxy) 뒤에서는 신뢰하는 프록시가 넣은 `X-Forwarded-For`만 사용한다 (`server.forward-headers-strategy` 설정).
 
 ### 8-8. 로깅
 
 - 요청 본문은 로그에 남기지 않는다. 남기는 것: traceId, 메서드, 경로, 상태 코드, 처리 시간, 이벤트 수, accepted/duplicated/rejected 수
-- 기기 ID는 앞 8자리만 남긴다 (디버깅용)
+- 기기 ID는 앞 8자리만 남긴다 (디버깅용). `DeviceIdFilter` 검증 전에 거절된 요청은 `device=-` (잘못된 헤더 값을 로그에 넣지 않음)
+- 쿼리 문자열과 IP(원본, 해시 모두)도 남기지 않는다.
+- 형식 (traceId는 로그 패턴이 붙임):
+
+```
+[req-63037bd2] c.p.server.event.service.EventService : events count=3 accepted=2 duplicated=0 rejected=1
+[req-63037bd2] c.p.s.common.filter.AccessLogFilter   : POST /api/events 200 196ms device=188df876
+```
 
 ### 8-9. CORS
 
@@ -958,7 +971,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 - [x] 주간 유지율이 일별 평균이 아니라 합계 기준인지
 - [x] 자세 분포 비율 합 100
 - [x] 월요일 00:00 주간 경계
-- [ ] Rate Limit 초과 시 429 + 본문 `retryAfter` + `Retry-After` 헤더
+- [x] Rate Limit 초과 시 429 + 본문 `retryAfter` + `Retry-After` 헤더
 - [x] `date` 생략 → 오늘, 응답 `date`에 오늘 날짜
 - [x] `date=2026-02-30`, `date=2026-1-5`, `date=abc` → 400 `INVALID_REQUEST`
 - [x] 미래 `date` → 200 + `hasData: false`
@@ -981,7 +994,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | `test` | 자동 테스트 | Testcontainers MySQL | — |
 | `prod` | 배포 | 운영 MySQL | 패키징 앱 origin (필요 시) |
 
-비밀값(DB 비밀번호, IP 해시 키)은 환경 변수로 주입하고 Git에 올리지 않는다.
+비밀값은 환경 변수로 주입하고 Git에 올리지 않는다: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `IP_HASH_SECRET`(32자 이상).
 
 ### 11-2. 배포 구성 (안)
 
@@ -1077,7 +1090,7 @@ ORDER BY kst_hour;
 | **2. 수집 API** | 최상위 구조 검증, 이벤트별 검증기, `EventRepository.insertIgnore` + `EventService`, `BodySizeFilter` | 중복 재전송 시 `duplicated`로 집계, 금지 필드 `rejected` |
 | **3. 조회 API (기본)** | `date` 파라미터, `day`, `week`, `hourly`(24개), `hasData`, `comment` | FE 26-10-27 수정안의 응답과 일치 |
 | **4. 조회 API (확장)** | `yesterday`, `lastWeek`, `turtleNeckTimeline`, `distribution` | 분포 비율 합 100 테스트 통과 |
-| **5. 보호 기능** | `RateLimitFilter`, IP HMAC 해시, 로그 마스킹, CORS | 한도 초과 시 429 + `retryAfter` |
+| **5. 보호 기능** | `RateLimitFilter`, IP HMAC 해시, 요청 로그와 기기 ID 마스킹 (CORS는 불필요, 8-9) | 한도 초과 시 429 + `retryAfter` |
 | **6. 테스트 정리** | 계약 테스트, 10-3 경계 사례 체크리스트 전부 통과 | 예시 JSON 전부 일치 |
 | **7. 로컬 연동** | 9-3 절차로 실제 클라이언트와 연결 | 앱 리포트 수치와 DB 집계 일치 |
 | **8. 배포** | 서버 구성, HTTPS, 운영 프로필, 읽기 전용 계정, SSH 터널 | 배포 빌드 앱이 운영 서버로 연동 |

@@ -6,6 +6,8 @@ import org.springframework.core.Ordered;
 public final class FilterOrders {
 
 	public static final int TRACE_ID = Ordered.HIGHEST_PRECEDENCE + 10;
+	/** traceId가 MDC에 들어간 뒤, 다른 필터가 거절한 요청까지 로그에 남기도록 바깥쪽에 둔다 */
+	public static final int ACCESS_LOG = Ordered.HIGHEST_PRECEDENCE + 15;
 	public static final int DEVICE_ID = Ordered.HIGHEST_PRECEDENCE + 20;
 	public static final int RATE_LIMIT = Ordered.HIGHEST_PRECEDENCE + 30;
 	public static final int BODY_SIZE = Ordered.HIGHEST_PRECEDENCE + 40;
