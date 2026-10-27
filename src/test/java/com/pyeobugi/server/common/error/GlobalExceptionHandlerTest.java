@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@WebMvcTest
+@WebMvcTest(controllers = GlobalExceptionHandlerTest.TestController.class)
 @Import({GlobalExceptionHandlerTest.TestController.class, ErrorResponseWriter.class})
 class GlobalExceptionHandlerTest {
 
