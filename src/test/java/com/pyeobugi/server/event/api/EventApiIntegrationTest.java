@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,6 +28,8 @@ import com.pyeobugi.server.FixedClockConfiguration;
 import com.pyeobugi.server.TestcontainersConfiguration;
 import com.pyeobugi.server.common.filter.BodySizeFilter;
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 /** POST /api/events 전체 흐름: 필터 → 최상위 구조 검증 → 이벤트별 검증 → 저장 */
 @Import({TestcontainersConfiguration.class, FixedClockConfiguration.class})
@@ -42,7 +45,16 @@ class EventApiIntegrationTest {
 	@Autowired
 	JdbcTemplate jdbcTemplate;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	private final String deviceId = UUID.randomUUID().toString();
+	private String deviceSecret;
+
+	@BeforeEach
+	void registerDevice() {
+		deviceSecret = deviceCredentialService.register(deviceId);
+	}
 
 	@Test
 	void validBatchReturnsCounts() throws Exception {
@@ -64,6 +76,7 @@ class EventApiIntegrationTest {
 	@Test
 	void upperCaseDeviceIdIsStoredInLowerCase() throws Exception {
 		mockMvc.perform(post("/api/events").header(DeviceIdFilter.HEADER, deviceId.toUpperCase())
+						.header(DeviceSecretFilter.HEADER, deviceSecret)
 						.contentType(MediaType.APPLICATION_JSON).content(batch(sessionStart(1))))
 				.andExpect(status().isOk());
 
@@ -118,6 +131,7 @@ class EventApiIntegrationTest {
 	private ResultActions postBatch(String body) throws Exception {
 		return mockMvc.perform(post("/api/events")
 				.header(DeviceIdFilter.HEADER, deviceId)
+				.header(DeviceSecretFilter.HEADER, deviceSecret)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(body));
 	}

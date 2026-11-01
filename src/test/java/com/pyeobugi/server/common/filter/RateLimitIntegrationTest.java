@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.pyeobugi.server.TestcontainersConfiguration;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 /** 설정값(pyeobugi.rate-limit)이 실제 필터 체인에 적용되는지 확인. 한도를 작게 바꿔서 띄운다. */
 @Import(TestcontainersConfiguration.class)
@@ -33,17 +34,23 @@ class RateLimitIntegrationTest {
 	@Autowired
 	MockMvc mockMvc;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	@Test
 	void deviceThenIpLimitsReturn429WithRetryAfter() throws Exception {
+		String secretA = deviceCredentialService.register(DEVICE_A);
+		String secretB = deviceCredentialService.register(DEVICE_B);
+
 		// 같은 IP(127.0.0.1)에서: 기기 A 3회 통과, 4회째 기기 한도 초과
 		for (int i = 0; i < 3; i++) {
-			summary(DEVICE_A).andExpect(status().isOk());
+			summary(DEVICE_A, secretA).andExpect(status().isOk());
 		}
-		assertRateLimited(summary(DEVICE_A));
+		assertRateLimited(summary(DEVICE_A, secretA));
 
 		// 기기 B 1회 통과(IP 5번째 토큰), 다음 요청은 IP 한도 초과
-		summary(DEVICE_B).andExpect(status().isOk());
-		assertRateLimited(summary(DEVICE_B));
+		summary(DEVICE_B, secretB).andExpect(status().isOk());
+		assertRateLimited(summary(DEVICE_B, secretB));
 	}
 
 	private static void assertRateLimited(ResultActions result) throws Exception {
@@ -54,8 +61,10 @@ class RateLimitIntegrationTest {
 				.andExpect(jsonPath("$.traceId").value(matchesPattern("^req-[0-9a-f]{8}$")));
 	}
 
-	private ResultActions summary(String deviceId) throws Exception {
-		return mockMvc.perform(get("/api/reports/summary").header(DeviceIdFilter.HEADER, deviceId));
+	private ResultActions summary(String deviceId, String secret) throws Exception {
+		return mockMvc.perform(get("/api/reports/summary")
+				.header(DeviceIdFilter.HEADER, deviceId)
+				.header(DeviceSecretFilter.HEADER, secret));
 	}
 
 }

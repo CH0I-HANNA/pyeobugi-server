@@ -15,6 +15,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +40,9 @@ class SkeletonIntegrationTest {
 
 	@Autowired
 	JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
 
 	@Test
 	void serverIsConnectedToMigratedDatabase() {
@@ -68,9 +73,12 @@ class SkeletonIntegrationTest {
 
 	@Test
 	void validDeviceIdPassesFilterAndReachesDispatcher() throws Exception {
+		String secret = deviceCredentialService.register(VALID_DEVICE_ID);
+
 		// 없는 /api 경로로 보내서, 필터를 통과해 DispatcherServlet까지 가면 404 NOT_FOUND가 나오는지 본다
 		HttpResponse<String> response = send(get("/api/unknown")
-				.header(DeviceIdFilter.HEADER, VALID_DEVICE_ID).build());
+				.header(DeviceIdFilter.HEADER, VALID_DEVICE_ID)
+				.header(DeviceSecretFilter.HEADER, secret).build());
 
 		assertThat(response.statusCode()).isEqualTo(404);
 		JsonNode body = jsonMapper.readTree(response.body());

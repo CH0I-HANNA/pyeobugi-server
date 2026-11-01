@@ -10,6 +10,8 @@ public final class FilterOrders {
 	public static final int ACCESS_LOG = Ordered.HIGHEST_PRECEDENCE + 15;
 	public static final int DEVICE_ID = Ordered.HIGHEST_PRECEDENCE + 20;
 	public static final int RATE_LIMIT = Ordered.HIGHEST_PRECEDENCE + 30;
+	/** RateLimit 뒤에 둬서, 틀린 토큰을 반복 시도하는 것도 Rate Limit에 걸리게 한다 */
+	public static final int DEVICE_SECRET = Ordered.HIGHEST_PRECEDENCE + 35;
 	public static final int BODY_SIZE = Ordered.HIGHEST_PRECEDENCE + 40;
 
 	private FilterOrders() {

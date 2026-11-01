@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pyeobugi.server.TestcontainersConfiguration;
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 import tools.jackson.databind.JsonNode;
 
@@ -30,18 +32,22 @@ class EventsContractTest {
 	@Autowired
 	MockMvc mockMvc;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	@Test
 	void fullSessionThenMixedBatchMatchesMockResponses() throws Exception {
 		String deviceId = UUID.randomUUID().toString();
+		String secret = deviceCredentialService.register(deviceId);
 
-		assertMatches(postEvents(deviceId, "post-events.request.json"), "post-events.response.json");
+		assertMatches(postEvents(deviceId, secret, "post-events.request.json"), "post-events.response.json");
 		// mixed의 첫 이벤트는 위 요청의 SESSION_START와 같은 eventId라서 duplicated가 된다
-		assertMatches(postEvents(deviceId, "post-events-mixed.request.json"), "post-events-mixed.response.json");
+		assertMatches(postEvents(deviceId, secret, "post-events-mixed.request.json"), "post-events-mixed.response.json");
 	}
 
 	@Test
 	void invalidDeviceIdMatchesMockStatusAndCode() throws Exception {
-		MockHttpServletResponse response = postEvents("not-a-uuid", "post-events.request.json");
+		MockHttpServletResponse response = postEvents("not-a-uuid", null, "post-events.request.json");
 		JsonNode expected = ContractExamples.example("error-device-id.response.json");
 
 		// message와 traceId는 서버마다 달라서 비교하지 않는다 (FE는 code만 필수로 본다)
@@ -50,12 +56,15 @@ class EventsContractTest {
 				.isEqualTo(expected.get("body").get("code"));
 	}
 
-	private MockHttpServletResponse postEvents(String deviceId, String requestFile) throws Exception {
-		return mockMvc.perform(post("/api/events")
-						.header(DeviceIdFilter.HEADER, deviceId)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(ContractExamples.read(requestFile)))
-				.andReturn().getResponse();
+	private MockHttpServletResponse postEvents(String deviceId, String secret, String requestFile) throws Exception {
+		var request = post("/api/events")
+				.header(DeviceIdFilter.HEADER, deviceId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(ContractExamples.read(requestFile));
+		if (secret != null) {
+			request.header(DeviceSecretFilter.HEADER, secret);
+		}
+		return mockMvc.perform(request).andReturn().getResponse();
 	}
 
 	/** JSON 객체의 필드 순서는 무시하고, 배열 순서와 값은 그대로 비교한다 */
