@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pyeobugi.server.FixedClockConfiguration;
 import com.pyeobugi.server.TestcontainersConfiguration;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 /** 요청 로그에 필요한 정보만 남고, 본문·전체 기기 ID·쿼리 문자열은 남지 않는지 확인 (plan 8-8) */
 @Import({TestcontainersConfiguration.class, FixedClockConfiguration.class})
@@ -31,10 +32,15 @@ class AccessLogIntegrationTest {
 	@Autowired
 	MockMvc mockMvc;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	@Test
 	void eventsRequestLogsSummaryWithoutBodyOrFullDeviceId(CapturedOutput output) throws Exception {
+		String secret = deviceCredentialService.register(DEVICE_ID);
 		mockMvc.perform(post("/api/events")
 				.header(DeviceIdFilter.HEADER, DEVICE_ID)
+				.header(DeviceSecretFilter.HEADER, secret)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 						{"events":[{"eventId":"b1c2d3e4-0000-4000-8000-0000000000a1","type":"SESSION_START",

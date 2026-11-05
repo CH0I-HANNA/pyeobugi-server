@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -32,7 +33,9 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import com.pyeobugi.server.TestcontainersConfiguration;
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
 import com.pyeobugi.server.common.time.KstTimeUtils;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 import com.pyeobugi.server.event.api.PostEventsResponse;
 import com.pyeobugi.server.event.service.EventService;
 
@@ -58,9 +61,18 @@ class ReportApiIntegrationTest {
 	@Autowired
 	EventService eventService;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	private final String deviceId = UUID.randomUUID().toString();
 	private final List<JsonNode> pending = new ArrayList<>();
 	private int seq;
+	private String deviceSecret;
+
+	@BeforeEach
+	void registerDevice() {
+		deviceSecret = deviceCredentialService.register(deviceId);
+	}
 
 	@Test
 	void dayHourlyAndCommentForToday() throws Exception {
@@ -288,7 +300,9 @@ class ReportApiIntegrationTest {
 	}
 
 	private ResultActions summary(String date) throws Exception {
-		var request = get("/api/reports/summary").header(DeviceIdFilter.HEADER, deviceId);
+		var request = get("/api/reports/summary")
+				.header(DeviceIdFilter.HEADER, deviceId)
+				.header(DeviceSecretFilter.HEADER, deviceSecret);
 		if (date != null) {
 			request.param("date", date);
 		}

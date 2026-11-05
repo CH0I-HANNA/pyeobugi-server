@@ -18,6 +18,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pyeobugi.server.TestcontainersConfiguration;
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
+import com.pyeobugi.server.device.service.DeviceCredentialService;
 
 import tools.jackson.databind.JsonNode;
 
@@ -34,18 +36,25 @@ class ReportsContractTest {
 	@Autowired
 	MockMvc mockMvc;
 
+	@Autowired
+	DeviceCredentialService deviceCredentialService;
+
 	@Test
 	void reportAfterExampleEventsMatchesMock() throws Exception {
 		String deviceId = UUID.randomUUID().toString();
-		postEvents(deviceId, "post-events.request.json");
-		postEvents(deviceId, "post-events-mixed.request.json");
+		String secret = deviceCredentialService.register(deviceId);
+		postEvents(deviceId, secret, "post-events.request.json");
+		postEvents(deviceId, secret, "post-events-mixed.request.json");
 
-		assertMatchesOldFormat(summary(deviceId), "reports-summary.response.json");
+		assertMatchesOldFormat(summary(deviceId, secret), "reports-summary.response.json");
 	}
 
 	@Test
 	void newDeviceReportMatchesMockEmptyReport() throws Exception {
-		assertMatchesOldFormat(summary(UUID.randomUUID().toString()), "reports-summary-empty.response.json");
+		String deviceId = UUID.randomUUID().toString();
+		String secret = deviceCredentialService.register(deviceId);
+
+		assertMatchesOldFormat(summary(deviceId, secret), "reports-summary-empty.response.json");
 	}
 
 	private static void assertMatchesOldFormat(MockHttpServletResponse response, String expectedFile) throws Exception {
@@ -61,14 +70,17 @@ class ReportsContractTest {
 		assertThat(actual.get("comment")).isEqualTo(expectedBody.get("comment"));
 	}
 
-	private MockHttpServletResponse summary(String deviceId) throws Exception {
-		return mockMvc.perform(get("/api/reports/summary").header(DeviceIdFilter.HEADER, deviceId))
+	private MockHttpServletResponse summary(String deviceId, String secret) throws Exception {
+		return mockMvc.perform(get("/api/reports/summary")
+						.header(DeviceIdFilter.HEADER, deviceId)
+						.header(DeviceSecretFilter.HEADER, secret))
 				.andReturn().getResponse();
 	}
 
-	private void postEvents(String deviceId, String requestFile) throws Exception {
+	private void postEvents(String deviceId, String secret, String requestFile) throws Exception {
 		mockMvc.perform(post("/api/events")
 						.header(DeviceIdFilter.HEADER, deviceId)
+						.header(DeviceSecretFilter.HEADER, secret)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(ContractExamples.read(requestFile)))
 				.andExpect(status().isOk());

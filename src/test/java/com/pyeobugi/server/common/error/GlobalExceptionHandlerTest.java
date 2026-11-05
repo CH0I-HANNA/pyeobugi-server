@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pyeobugi.server.common.filter.BodySizeFilter;
 import com.pyeobugi.server.common.filter.DeviceIdFilter;
+import com.pyeobugi.server.common.filter.DeviceSecretFilter;
 import com.pyeobugi.server.common.filter.RateLimitFilter;
 
 /**
@@ -31,7 +32,7 @@ import com.pyeobugi.server.common.filter.RateLimitFilter;
 @WebMvcTest(
 		controllers = GlobalExceptionHandlerTest.TestController.class,
 		excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
-				classes = {DeviceIdFilter.class, RateLimitFilter.class, BodySizeFilter.class}))
+				classes = {DeviceIdFilter.class, RateLimitFilter.class, DeviceSecretFilter.class, BodySizeFilter.class}))
 @Import(GlobalExceptionHandlerTest.TestController.class)
 class GlobalExceptionHandlerTest {
 

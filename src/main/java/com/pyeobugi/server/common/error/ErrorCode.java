@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 public enum ErrorCode {
 
 	DEVICE_ID_INVALID(HttpStatus.BAD_REQUEST, "X-Device-Id 헤더가 없거나 UUID v4 형식이 아닙니다."),
+	DEVICE_SECRET_INVALID(HttpStatus.UNAUTHORIZED, "X-Device-Secret이 없거나 일치하지 않습니다."),
+	DEVICE_ALREADY_REGISTERED(HttpStatus.CONFLICT, "이미 등록된 기기입니다."),
 	INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다."),
 	NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 경로입니다."),
 	METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
