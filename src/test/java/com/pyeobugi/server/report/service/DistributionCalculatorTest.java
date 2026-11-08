@@ -17,8 +17,8 @@ class DistributionCalculatorTest {
 		assertThat(d.goodRate()).isEqualTo(PostureKeepRate.of(200, 43)).isEqualTo(79);
 		assertThat(d.turtleRate()).isEqualTo(21);
 		assertThat(d.goodRate() + d.turtleRate()).isEqualTo(100);
-		assertThat(d.mildSeconds()).isNull();
-		assertThat(d.mildRate()).isNull();
+		assertThat(d.mildSeconds()).isZero();
+		assertThat(d.mildRate()).isZero();
 	}
 
 	@Test
