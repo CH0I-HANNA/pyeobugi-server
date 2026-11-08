@@ -295,8 +295,8 @@ class ReportApiIntegrationTest {
 				.andExpect(jsonPath("$.distribution.turtleSeconds").value(66))
 				.andExpect(jsonPath("$.distribution.goodRate").value(73))
 				.andExpect(jsonPath("$.distribution.turtleRate").value(27))
-				.andExpect(jsonPath("$.distribution.mildSeconds").value(nullValue()))
-				.andExpect(jsonPath("$.distribution.mildRate").value(nullValue()));
+				.andExpect(jsonPath("$.distribution.mildSeconds").value(0))
+				.andExpect(jsonPath("$.distribution.mildRate").value(0));
 	}
 
 	private ResultActions summary(String date) throws Exception {

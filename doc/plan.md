@@ -822,11 +822,11 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | 구간 | 계산 |
 | --- | --- |
 | 바른 자세 | `duration − bad` |
-| 살짝 숙임 | `mild` (데모는 `null`) |
+| 살짝 숙임 | `mild` (데모는 `0`) |
 | 거북목 | `bad − mild` (데모는 `bad`) |
 
 - 비율은 바른 자세를 항상 `postureKeepRate`와 같은 값으로 고정하고, 나머지는 **최대 잔여 방식(largest remainder method)** 으로 반올림해 합이 100이 되게 맞춘다.
-- `mild_rows = 0`이면 2단계로 응답한다 (`mild*` = `null`).
+- `mild_rows = 0`이면 2단계로 응답한다 (`mildSeconds`, `mildRate` = `0`). 처음에는 `null`이었으나 Swagger 명세(number)와 맞춰 달라는 FE 요청(11-08)으로 `0`으로 바꿨다.
 
 **코멘트 판정** (mock 동작과 동일하게 시작, 값은 설정 파일로 분리)
 
