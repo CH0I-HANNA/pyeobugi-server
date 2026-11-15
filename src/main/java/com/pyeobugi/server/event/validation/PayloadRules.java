@@ -12,7 +12,8 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * 타입별 payload 화이트리스트와 값 규칙 (mock validate.ts의 PAYLOAD_FIELDS와 동일).
- * 정의된 필드는 모두 필수이고, 값이 없거나 null이면 규칙을 통과하지 못한다.
+ * 필수 필드는 값이 없거나 null이면 규칙을 통과하지 못한다.
+ * 선택 필드는 없어도 되지만, 있으면 규칙을 통과해야 한다 (null도 거절).
  */
 final class PayloadRules {
 
@@ -26,6 +27,7 @@ final class PayloadRules {
 			n -> n != null && n.isNumber() && n.canConvertToExactIntegral() && n.canConvertToLong();
 
 	private static final Map<EventType, Map<String, Predicate<JsonNode>>> FIELDS = new EnumMap<>(EventType.class);
+	private static final Map<EventType, Map<String, Predicate<JsonNode>>> OPTIONAL_FIELDS = new EnumMap<>(EventType.class);
 
 	static {
 		FIELDS.put(EventType.SESSION_START, Map.of());
@@ -44,13 +46,27 @@ final class PayloadRules {
 				"stretch", BOOLEAN,
 				"awayPause", BOOLEAN,
 				"overlay", BOOLEAN));
+
+		// 살짝 숙임 시간 (3단계 분포). 구버전 클라이언트는 보내지 않으므로 선택 필드
+		OPTIONAL_FIELDS.put(EventType.USAGE_SEGMENT, Map.of("mildDurationSec", INTEGER));
 	}
 
 	private PayloadRules() {
 	}
 
+	/** 필수 필드 */
 	static Map<String, Predicate<JsonNode>> of(EventType type) {
 		return FIELDS.get(type);
+	}
+
+	/** 선택 필드 */
+	static Map<String, Predicate<JsonNode>> optionalOf(EventType type) {
+		return OPTIONAL_FIELDS.getOrDefault(type, Map.of());
+	}
+
+	/** payload에 올 수 있는 필드 전체 (필수 + 선택) */
+	static boolean allows(EventType type, String field) {
+		return FIELDS.get(type).containsKey(field) || optionalOf(type).containsKey(field);
 	}
 
 	static String text(JsonNode node) {

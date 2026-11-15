@@ -299,6 +299,25 @@ class ReportApiIntegrationTest {
 				.andExpect(jsonPath("$.distribution.mildRate").value(0));
 	}
 
+	@Test
+	void distributionSplitsBadIntoMildAndTurtle() throws Exception {
+		segment("2026-10-08T09:00:00", 60, 18, 10);
+		segment("2026-10-08T09:01:00", 60, 18, 0);
+		segment("2026-10-08T14:00:00", 60, 0, 0);
+		segment("2026-10-08T20:59:30", 60, 30);   // 구버전 클라이언트: mild 없음 → 전부 거북목
+		save();
+
+		// bad 66 = mild 10 + turtle 56, 유지율 73 → 나머지 27을 10:56으로 (4.09 / 22.91 → 4 + 23)
+		summary(null)
+				.andExpect(jsonPath("$.day.postureKeepRate").value(73))
+				.andExpect(jsonPath("$.distribution.goodSeconds").value(174))
+				.andExpect(jsonPath("$.distribution.mildSeconds").value(10))
+				.andExpect(jsonPath("$.distribution.turtleSeconds").value(56))
+				.andExpect(jsonPath("$.distribution.goodRate").value(73))
+				.andExpect(jsonPath("$.distribution.mildRate").value(4))
+				.andExpect(jsonPath("$.distribution.turtleRate").value(23));
+	}
+
 	private ResultActions summary(String date) throws Exception {
 		var request = get("/api/reports/summary")
 				.header(DeviceIdFilter.HEADER, deviceId)
@@ -316,6 +335,16 @@ class ReportApiIntegrationTest {
 				{"eventId":"%s","type":"USAGE_SEGMENT","sessionId":"%s","occurredAt":"%s",
 				 "payload":{"startedAt":"%s","endedAt":"%s","durationSec":%d,"badDurationSec":%d}}
 				""".formatted(nextEventId(), SESSION_ID, endedAt, ISO.format(start), endedAt, durationSec, badDurationSec)));
+	}
+
+	private void segment(String startedAt, int durationSec, int badDurationSec, int mildDurationSec) {
+		LocalDateTime start = LocalDateTime.parse(startedAt);
+		String endedAt = ISO.format(start.plusSeconds(durationSec));
+		pending.add(MAPPER.readTree("""
+				{"eventId":"%s","type":"USAGE_SEGMENT","sessionId":"%s","occurredAt":"%s",
+				 "payload":{"startedAt":"%s","endedAt":"%s","durationSec":%d,"badDurationSec":%d,"mildDurationSec":%d}}
+				""".formatted(nextEventId(), SESSION_ID, endedAt, ISO.format(start), endedAt, durationSec,
+				badDurationSec, mildDurationSec)));
 	}
 
 	private void event(String type, String occurredAt, String payload) {
