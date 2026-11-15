@@ -66,7 +66,7 @@ public class ReportService {
 				new TurtleNeckTimeline(
 						turtleNeckTimes.stream().map(KstTimeUtils::formatDateTime).toList(),
 						PeakHours.of(turtleNeckTimes)),
-				DistributionCalculator.of(dayStats.getUsageSec(), dayStats.getBadSec()),
+				DistributionCalculator.of(dayStats.getUsageSec(), dayStats.getBadSec(), dayStats.getMildSec()),
 				CommentPolicy.of(day.usageSeconds(), day.postureKeepRate()));
 	}
 

@@ -21,6 +21,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 			SELECT
 			  CAST(COALESCE(SUM(duration_sec), 0)                AS SIGNED) AS usageSec,
 			  CAST(COALESCE(SUM(bad_duration_sec), 0)            AS SIGNED) AS badSec,
+			  CAST(COALESCE(SUM(mild_duration_sec), 0)           AS SIGNED) AS mildSec,
 			  CAST(COALESCE(SUM(type = 'POSTURE_BAD'), 0)        AS SIGNED) AS turtleCount,
 			  CAST(COALESCE(SUM(type = 'POMODORO_COMPLETED'), 0) AS SIGNED) AS pomodoroCount
 			FROM events

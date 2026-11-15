@@ -46,7 +46,7 @@ public class EventValidator {
 		JsonNode payload = raw.get("payload");
 		// 3. payload 화이트리스트 (타입을 알 때만 판단 가능)
 		if (type.isPresent() && payload != null && payload.isObject()
-				&& !PayloadRules.of(type.get()).keySet().containsAll(payload.propertyNames())) {
+				&& !payload.propertyNames().stream().allMatch(f -> PayloadRules.allows(type.get(), f))) {
 			return reject(RejectCode.FORBIDDEN_FIELD);
 		}
 		// 4. eventId, sessionId
@@ -76,6 +76,11 @@ public class EventValidator {
 				return reject(RejectCode.INVALID_PAYLOAD);
 			}
 		}
+		for (Map.Entry<String, Predicate<JsonNode>> field : PayloadRules.optionalOf(type.get()).entrySet()) {
+			if (payload.has(field.getKey()) && !field.getValue().test(payload.get(field.getKey()))) {
+				return reject(RejectCode.INVALID_PAYLOAD);
+			}
+		}
 		// 10~11. USAGE_SEGMENT 추가 규칙
 		if (type.get() == EventType.USAGE_SEGMENT) {
 			return validateSegment(eventId, sessionId, occurredAt.get(), payload, now);
@@ -94,10 +99,13 @@ public class EventValidator {
 		}
 		long duration = payload.get("durationSec").asLong();
 		long bad = payload.get("badDurationSec").asLong();
+		// 선택 필드: 구버전 클라이언트는 보내지 않는다 (null로 저장, 3단계 분포에서 살짝 숙임 0으로 취급)
+		Long mild = payload.has("mildDurationSec") ? payload.get("mildDurationSec").asLong() : null;
 		boolean endsAtNextMidnight = ended.equals(started.toLocalDate().plusDays(1).atStartOfDay());
 		boolean sameDay = started.toLocalDate().equals(ended.toLocalDate()) || endsAtNextMidnight;
 		boolean valid = bad >= 0
 				&& bad <= duration
+				&& (mild == null || (mild >= 0 && mild <= bad))
 				&& duration <= MAX_SEGMENT_SEC
 				&& started.isBefore(ended)
 				&& sameDay
@@ -107,7 +115,7 @@ public class EventValidator {
 			return reject(RejectCode.INVALID_PAYLOAD);
 		}
 		return new Valid(new ValidatedEvent(eventId, sessionId, EventType.USAGE_SEGMENT, occurredAt,
-				started.toLocalDate(), started.getHour(), (int) duration, (int) bad, null, payload.toString()));
+				started.toLocalDate(), started.getHour(), (int) duration, (int) bad, mild == null ? null : mild.intValue(), payload.toString()));
 	}
 
 	/** 현재 +5분 ~ 과거 30일 (경계 포함) */

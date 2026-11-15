@@ -49,14 +49,14 @@ public class EventController {
 			| `type` | 아래 표의 값 |
 			| `sessionId` | UUID v4 |
 			| `occurredAt` | KST 시각 `+09:00`, 초 단위. 현재 +5분 ~ 과거 30일 |
-			| `payload` | 타입별 객체. 필드가 모두 있어야 하고, 정의되지 않은 필드는 `FORBIDDEN_FIELD` |
+			| `payload` | 타입별 객체. 필수 필드는 모두 있어야 하고, 정의되지 않은 필드는 `FORBIDDEN_FIELD` |
 
 			**타입별 payload**
 
 			| type | payload |
 			| --- | --- |
 			| `SESSION_START`, `SESSION_END`, `POMODORO_COMPLETED` | `{}` |
-			| `USAGE_SEGMENT` | `startedAt`, `endedAt`, `durationSec`, `badDurationSec` |
+			| `USAGE_SEGMENT` | `startedAt`, `endedAt`, `durationSec`, `badDurationSec`, (선택) `mildDurationSec`: 나쁜 자세 중 살짝 숙인 시간 |
 			| `POSTURE_BAD` | `severity`: `MILD`, `MODERATE`, `SEVERE` |
 			| `CALIBRATION_COMPLETED` | `isRecalibration`: boolean |
 			| `BUBBLE_SHOWN` | `bubbleType`: `POSTURE`, `STRETCH`, `TIMER_BREAK`, `ENCOURAGE`, `GREETING` |
@@ -64,6 +64,7 @@ public class EventController {
 
 			**`USAGE_SEGMENT` 추가 규칙** (위반 시 `INVALID_PAYLOAD`)
 			- `0 ≤ badDurationSec ≤ durationSec ≤ 3600`
+			- `mildDurationSec`를 보내면 정수이고 `0 ≤ mildDurationSec ≤ badDurationSec` (`null`은 거절, 생략은 허용)
 			- `startedAt < endedAt`, 같은 KST 날짜 (자정 종료는 다음 날 `00:00:00` 허용)
 			- `durationSec = endedAt − startedAt` (±1초), `occurredAt = endedAt`
 
@@ -88,7 +89,8 @@ public class EventController {
 									        "startedAt": "2026-10-04T09:22:00+09:00",
 									        "endedAt": "2026-10-04T09:23:00+09:00",
 									        "durationSec": 60,
-									        "badDurationSec": 12
+									        "badDurationSec": 12,
+									        "mildDurationSec": 5
 									      }
 									    },
 									    {

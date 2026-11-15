@@ -82,24 +82,25 @@ public record ReportSummaryResponse(
 
 	}
 
-	/** 자세 분포. 데모는 2단계 판정이라 mild*는 0 (plan 8-6) */
+	/** 자세 분포. 나쁜 자세 = 살짝 숙임 + 거북목 (plan 8-6) */
 	@Schema(description = "자세 분포. 비율 세 개의 합은 항상 100이고, `goodRate`는 `day.postureKeepRate`와 같다. "
-			+ "현재 클라이언트는 살짝 숙임을 따로 판정하지 않아 `mildSeconds`, `mildRate`는 항상 0이다.",
+			+ "나쁜 자세 시간(`badDurationSec`)을 살짝 숙임(`mildDurationSec`)과 거북목으로 나눈다. "
+			+ "`mildDurationSec`를 보내지 않은 구간의 나쁜 자세는 모두 거북목으로 집계한다.",
 			requiredProperties = { "goodSeconds", "mildSeconds", "turtleSeconds", "goodRate", "mildRate", "turtleRate" })
 	public record Distribution(
 			@Schema(description = "바른 자세 시간(초) = 사용 시간 − 나쁜 자세 시간", minimum = "0", example = "10332")
 			long goodSeconds,
-			@Schema(description = "살짝 숙임 시간(초). 3단계 판정 도입 전까지 항상 0", minimum = "0", example = "0")
+			@Schema(description = "살짝 숙임 시간(초) = `mildDurationSec` 합", minimum = "0", example = "900")
 			long mildSeconds,
-			@Schema(description = "거북목 시간(초) = 나쁜 자세 시간 − 살짝 숙임 시간", minimum = "0", example = "2268")
+			@Schema(description = "거북목 시간(초) = 나쁜 자세 시간 − 살짝 숙임 시간", minimum = "0", example = "1368")
 			long turtleSeconds,
 			@Schema(description = "바른 자세 비율(%)", minimum = "0", maximum = "100", example = "82")
 			int goodRate,
-			@Schema(description = "살짝 숙임 비율(%). 3단계 판정 도입 전까지 항상 0", minimum = "0", maximum = "100",
-					example = "0")
+			@Schema(description = "살짝 숙임 비율(%). `100 − goodRate`를 살짝 숙임 : 거북목 시간 비율로 나눠 "
+					+ "최대 잔여 방식으로 반올림", minimum = "0", maximum = "100", example = "7")
 			int mildRate,
 			@Schema(description = "거북목 비율(%) = 100 − goodRate − mildRate", minimum = "0", maximum = "100",
-					example = "18")
+					example = "11")
 			int turtleRate) {
 	}
 

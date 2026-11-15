@@ -267,6 +267,56 @@ class EventValidatorTest {
 
 	}
 
+	/** 살짝 숙임 시간 (선택 필드) */
+	@Nested
+	class MildDuration {
+
+		private static final String START = "2026-10-04T23:59:00+09:00";
+		private static final String END = "2026-10-05T00:00:00+09:00";
+
+		@Test
+		void storesMildWhenPresent() {
+			ValidatedEvent e = valid(withMild(segment(START, END, 60, 12), 5));
+
+			assertThat(e.badDurationSec()).isEqualTo(12);
+			assertThat(e.mildDurationSec()).isEqualTo(5);
+		}
+
+		@ParameterizedTest
+		@ValueSource(longs = { 0, 12 })
+		void acceptsBoundaries(long mild) {
+			assertThat(valid(withMild(segment(START, END, 60, 12), mild)).mildDurationSec()).isEqualTo((int) mild);
+		}
+
+		@ParameterizedTest
+		@ValueSource(longs = { -1, 13 })
+		void rejectsOutOfRange(long mild) {
+			assertRejected(withMild(segment(START, END, 60, 12), mild), RejectCode.INVALID_PAYLOAD);
+		}
+
+		@Test
+		void rejectsNullOrNonInteger() {
+			ObjectNode nullMild = segment(START, END, 60, 12);
+			((ObjectNode) nullMild.get("payload")).putNull("mildDurationSec");
+			assertRejected(nullMild, RejectCode.INVALID_PAYLOAD);
+
+			ObjectNode fraction = segment(START, END, 60, 12);
+			((ObjectNode) fraction.get("payload")).put("mildDurationSec", 1.5);
+			assertRejected(fraction, RejectCode.INVALID_PAYLOAD);
+		}
+
+		@Test
+		void isNotAllowedOnOtherTypes() {
+			assertRejected(simple("SESSION_START", "{\"mildDurationSec\":1}"), RejectCode.FORBIDDEN_FIELD);
+		}
+
+		private ObjectNode withMild(ObjectNode event, long mild) {
+			((ObjectNode) event.get("payload")).put("mildDurationSec", mild);
+			return event;
+		}
+
+	}
+
 	private ValidatedEvent valid(JsonNode event) {
 		ValidationResult result = validator.validate(event, NOW);
 		assertThat(result).isInstanceOf(ValidationResult.Valid.class);

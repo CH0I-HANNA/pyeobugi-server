@@ -7,6 +7,9 @@ public interface PeriodStats {
 
 	Long getBadSec();
 
+	/** 살짝 숙임 시간 합. 구버전 클라이언트 구간(NULL)은 0으로 더해진다 */
+	Long getMildSec();
+
 	Long getTurtleCount();
 
 	Long getPomodoroCount();

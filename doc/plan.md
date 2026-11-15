@@ -656,7 +656,7 @@ X-Device-Id: 3f2b8c1e-6a4d-4e0b-9b7a-0c1d2e3f4a5b
 - `occurredAt = endedAt`
 - `startedAt`, `endedAt`에도 시각 허용 범위 적용
 - (합의 후 적용) `startedAt`과 `endedAt`이 같은 KST 시간대 (정시 종료 허용)
-- (합의 후 적용) `0 ≤ mildDurationSec ≤ badDurationSec`
+- `mildDurationSec`(선택): 보내면 정수이고 `0 ≤ mildDurationSec ≤ badDurationSec`. 생략하면 `NULL`로 저장 (구버전 클라이언트 호환을 위해 필수로 만들지 않는다. 그래서 feature flag 없이 서버를 먼저 배포하면 된다)
 
 > 합의 후 적용 규칙은 클라이언트가 해당 동작을 구현하기 **전에 켜면 정상 이벤트가 전부 거절된다.** 설정값(feature flag)으로 분리해 두고 클라이언트 배포 후에 켠다.
 
@@ -800,7 +800,7 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 }
 ```
 
-- `mild_duration_sec` 집계(`mildSec`, `mildRows`)는 3단계 분포를 만들 때(4단계) 추가한다.
+- `mildSec` = `SUM(mild_duration_sec)`. `NULL`(구버전 클라이언트 구간)은 더해지지 않아 그 구간의 bad는 전부 거북목이 된다.
 - `kst_hour`(`TINYINT`)도 드라이버가 돌려주는 타입이 환경마다 다를 수 있어 `CAST(... AS SIGNED)`로 `Long`에 맞춘다.
 - MySQL의 `SUM()`은 결과를 `DECIMAL`로 돌려주므로, 프로젝션의 `Long` getter와 타입이 어긋나지 않도록 SQL에서 `CAST(... AS SIGNED)`로 정수 변환한다.
 - `hasData`는 요청 날짜 기준이라 별도 쿼리 없이 `day`의 `PeriodStats`로 판정한다 (`usageSec > 0 || turtleCount > 0 || pomodoroCount > 0`). `USAGE_SEGMENT`의 `duration_sec`이 0이면 `usageSec`에 더해지지 않으므로 기존 `duration_sec > 0` 조건과 같다.
@@ -822,11 +822,12 @@ public interface ReportQueryRepository extends Repository<EventEntity, Long> {
 | 구간 | 계산 |
 | --- | --- |
 | 바른 자세 | `duration − bad` |
-| 살짝 숙임 | `mild` (데모는 `0`) |
-| 거북목 | `bad − mild` (데모는 `bad`) |
+| 살짝 숙임 | `mild` |
+| 거북목 | `bad − mild` |
 
-- 비율은 바른 자세를 항상 `postureKeepRate`와 같은 값으로 고정하고, 나머지는 **최대 잔여 방식(largest remainder method)** 으로 반올림해 합이 100이 되게 맞춘다.
-- `mild_rows = 0`이면 2단계로 응답한다 (`mildSeconds`, `mildRate` = `0`). 처음에는 `null`이었으나 Swagger 명세(number)와 맞춰 달라는 FE 요청(11-08)으로 `0`으로 바꿨다.
+- 비율은 바른 자세를 항상 `postureKeepRate`와 같은 값으로 고정하고, 나머지(`100 − goodRate`)를 `mild : turtle` 시간 비율로 나눠 **최대 잔여 방식(largest remainder method)** 으로 반올림한다. 합은 항상 100이다. 남은 1%p는 나머지가 큰 쪽, 같으면 거북목에 준다.
+- 살짝 숙임 데이터가 없으면 `mildSeconds`, `mildRate`는 `0`이다 (FE 요청(11-08)으로 `null` 대신 `0`).
+- FE 제안(11-15)으로 `USAGE_SEGMENT`에 `mildDurationSec`를 추가했다. 살짝 숙임은 bad에 포함되므로 유지율도 깎는다 (기획 확인 필요, 14장 #2).
 
 **코멘트 판정** (mock 동작과 동일하게 시작, 값은 설정 파일로 분리)
 
@@ -1095,7 +1096,7 @@ ORDER BY kst_hour;
 | **7. 로컬 연동** | 9-3 절차로 실제 클라이언트와 연결 | 앱 리포트 수치와 DB 집계 일치 |
 | **8. 배포** | 서버 구성, HTTPS, 운영 프로필, 읽기 전용 계정, SSH 터널 | 배포 빌드 앱이 운영 서버로 연동 |
 | **9. 전달** | 운영 SQL과 접속 가이드를 기획자에게 전달, OpenAPI 문서 공유 | 기획자가 직접 조회 가능 |
-| **10. 확장 (합의 후)** | 정시 분할 검증 켜기, `mildDurationSec` 수신과 3단계 분포 | 클라이언트 배포 후 설정값으로 활성화 |
+| **10. 확장 (합의 후)** | 정시 분할 검증 켜기, ~~`mildDurationSec` 수신과 3단계 분포~~ (선택 필드로 구현 완료) | 클라이언트 배포 후 설정값으로 활성화 |
 
 ---
 
@@ -1104,7 +1105,7 @@ ORDER BY kst_hour;
 | # | 항목 | 현재 상태 / 백엔드 제안 | 확인 대상 | 영향 |
 | --- | --- | --- | --- | --- |
 | 1 | 이벤트 구조 | 기획서의 "세션 종료(초) + 정자세 회복" 대신 FE 초안의 `USAGE_SEGMENT` 채택 | 기획 | 수집·집계 전체 |
-| 2 | 3단계 자세 분포 | AI는 나쁜 자세를 하나로 판정(ADR 0002). 살짝 숙임 추가 시 `badDurationSec` = 살짝 숙임 + 거북목, `mildDurationSec` 추가 제안. 살짝 숙임도 유지율에서 빠지는지 확인 | 기획, AI | 분포 차트, 유지율 정의 |
+| 2 | 3단계 자세 분포 | **구현**: `badDurationSec` = 살짝 숙임 + 거북목, `mildDurationSec`(선택) 추가 (FE 11-15 제안). 남은 확인: 살짝 숙임도 유지율을 깎는 게 맞는지, 살짝 숙임에도 `POSTURE_BAD`가 오는지 | 기획, FE | 분포 차트, 유지율 정의 |
 | 3 | ~~`severity` 허용 값~~ | **확정**: `MILD`, `MODERATE`, `SEVERE` | AI | 검증 규칙 |
 | 4 | ~~개발 모드 mock 끄기~~ | **확정**: 환경 변수를 넣으면 mock이 자동으로 꺼짐 | AI | 로컬 연동 |
 | 5 | 정시 분할 | `USAGE_SEGMENT`를 매 정시에서 끊어 주기 (현재 오차는 시간대당 최대 1분 수준) | AI | 시간대별 차트 정확도 |
